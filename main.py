@@ -21,6 +21,7 @@ from database import (
     get_schedule,
     save_schedule,
     list_staff,
+    get_staff,
     list_shifts,
     create_staff,
     update_staff,
@@ -28,18 +29,14 @@ from database import (
     create_shift,
     update_shift,
     delete_shift,
+    create_shift_from_template,
+    apply_template,
 )
 from scheduler import generate_schedule
 from ortools.sat.python import cp_model
 
-# Ensure DB and seed if empty
+# Ensure DB (no auto-seed; app starts empty until user applies a template)
 init_db()
-if not get_shift_list():
-    try:
-        from database import seed_from_config
-        seed_from_config()
-    except Exception:
-        pass
 
 app = FastAPI(title="MT Shift Optimizer")
 
@@ -64,16 +61,26 @@ class StaffUpdate(BaseModel):
     skills: list[str] = []
 
 
+class PositionItem(BaseModel):
+    name: str
+    constraint_note: str | None = None
+    regular_only: bool | None = None
+
+
 class ShiftCreate(BaseModel):
     name: str
-    donor: int = 1
-    xmatch: int = 1
+    donor: int = 0
+    xmatch: int = 0
+    positions: list[PositionItem] | None = None
+    active_days: str | None = None
 
 
 class ShiftUpdate(BaseModel):
     name: str
-    donor: int = 1
-    xmatch: int = 1
+    donor: int = 0
+    xmatch: int = 0
+    positions: list[PositionItem] | None = None
+    active_days: str | None = None
 
 
 class NumDaysUpdate(BaseModel):
@@ -95,6 +102,14 @@ class ScheduleRunBody(BaseModel):
 @app.get("/api/staff")
 def api_list_staff():
     return list_staff()
+
+
+@app.get("/api/staff/{staff_id:int}")
+def api_get_staff(staff_id: int):
+    staff = get_staff(staff_id)
+    if staff is None:
+        raise HTTPException(status_code=404, detail="Staff not found.")
+    return staff
 
 
 @app.post("/api/staff")
@@ -123,14 +138,47 @@ def api_list_shifts():
 
 @app.post("/api/shifts")
 def api_create_shift(body: ShiftCreate):
-    sid = create_shift(body.name, body.donor, body.xmatch)
-    return {"id": sid, "name": body.name, "donor": body.donor, "xmatch": body.xmatch}
+    positions = None
+    if body.positions is not None:
+        positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False} for p in body.positions]
+    sid = create_shift(body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days)
+    out = {"id": sid, "name": body.name}
+    if positions is not None:
+        out["positions"] = [{"name": p["name"], "constraint_note": p["constraint_note"], "regular_only": p["regular_only"]} for p in positions]
+    else:
+        out["donor"] = body.donor
+        out["xmatch"] = body.xmatch
+    return out
+
+
+@app.post("/api/shifts/from-template")
+def api_create_shift_from_template(template: int = Query(..., ge=1, le=3), name: str | None = Query(None)):
+    sid = create_shift_from_template(template, name_override=name)
+    shifts = list_shifts()
+    created = next((s for s in shifts if s["id"] == sid), None)
+    return {"id": sid, "shift": created}
+
+
+@app.post("/api/apply-template")
+def api_apply_template(template: int = Query(..., ge=1, le=3)):
+    """Apply template: creates shift(s) and for template 1 also loads staff from config."""
+    shift_ids = apply_template(template)
+    return {"shift_ids": shift_ids, "staff_loaded": template == 1}
 
 
 @app.put("/api/shifts/{shift_id:int}")
 def api_update_shift(shift_id: int, body: ShiftUpdate):
-    update_shift(shift_id, body.name, body.donor, body.xmatch)
-    return {"id": shift_id, "name": body.name, "donor": body.donor, "xmatch": body.xmatch}
+    positions = None
+    if body.positions is not None:
+        positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False} for p in body.positions]
+    update_shift(shift_id, body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days)
+    out = {"id": shift_id, "name": body.name}
+    if positions is not None:
+        out["positions"] = [{"name": p["name"], "constraint_note": p["constraint_note"], "regular_only": p["regular_only"]} for p in positions]
+    else:
+        out["donor"] = body.donor
+        out["xmatch"] = body.xmatch
+    return out
 
 
 @app.delete("/api/shifts/{shift_id:int}")
@@ -188,21 +236,9 @@ def api_run_schedule(
         raise HTTPException(status_code=400, detail="No staff. Add at least one staff.")
     if not shift_list:
         raise HTTPException(status_code=400, detail="No shifts. Add at least one shift.")
-    shifts, rooms, solver, status = generate_schedule(num_days=num_days)
+    slots, solver, status = generate_schedule(num_days=num_days)
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         raise HTTPException(status_code=422, detail="No feasible schedule found.")
-    slots = []
-    for day in range(num_days):
-        for shift in shift_list:
-            for room in ("donor", "xmatch"):
-                for mt in mt_list:
-                    if solver.value(rooms[(mt["name"], day, shift["name"], room)]) == 1:
-                        slots.append({
-                            "staff_name": mt["name"],
-                            "day": day,
-                            "shift_name": shift["name"],
-                            "room": room,
-                        })
     start_date = get_schedule_start_date()
     run_id = save_schedule(num_days, slots, start_date=start_date)
     data = get_schedule(run_id)
@@ -238,21 +274,33 @@ def api_export_schedule_csv(run_id: int | None = None):
     buf = io.StringIO()
     w = csv.writer(buf)
     start_date = data.get("start_date")
+    pos_key = "position" if data["slots"] and "position" in data["slots"][0] else "room"
+    has_tw = data["slots"] and data["slots"][0].get("time_window")
+    header = ["date", "day", "shift", "position", "staff_name"] if not has_tw else ["date", "day", "shift", "position", "time_window", "staff_name"]
     if start_date:
-        w.writerow(["date", "day", "shift", "room", "staff_name"])
+        w.writerow(header)
         try:
             base = datetime.strptime(start_date, "%Y-%m-%d").date()
             for s in data["slots"]:
                 d = base + timedelta(days=s["day"])
-                w.writerow([d.isoformat(), s["day"] + 1, s["shift_name"], s["room"], s["staff_name"]])
+                row = [d.isoformat(), s["day"] + 1, s["shift_name"], s.get(pos_key, s.get("room", "")), s["staff_name"]]
+                if has_tw:
+                    row.insert(4, s.get("time_window", ""))
+                w.writerow(row)
         except ValueError:
-            w.writerow(["day", "shift", "room", "staff_name"])
+            w.writerow([h for h in header if h != "date"])
             for s in data["slots"]:
-                w.writerow([s["day"] + 1, s["shift_name"], s["room"], s["staff_name"]])
+                row = [s["day"] + 1, s["shift_name"], s.get(pos_key, s.get("room", "")), s["staff_name"]]
+                if has_tw:
+                    row.insert(3, s.get("time_window", ""))
+                w.writerow(row)
     else:
-        w.writerow(["day", "shift", "room", "staff_name"])
+        w.writerow([h for h in header if h != "date"])
         for s in data["slots"]:
-            w.writerow([s["day"] + 1, s["shift_name"], s["room"], s["staff_name"]])
+            row = [s["day"] + 1, s["shift_name"], s.get(pos_key, s.get("room", "")), s["staff_name"]]
+            if has_tw:
+                row.insert(3, s.get("time_window", ""))
+            w.writerow(row)
     content = buf.getvalue().encode("utf-8-sig")
     return Response(
         content=content,
@@ -262,6 +310,15 @@ def api_export_schedule_csv(run_id: int | None = None):
 
 
 # --- Frontend: serve index ---
+@app.get("/staff", response_class=HTMLResponse)
+def staff_page():
+    """หน้ารายละเอียดบุคลากร (ใช้ query ?id=...)"""
+    staff_html = STATIC_DIR / "staff.html"
+    if staff_html.exists():
+        return FileResponse(staff_html)
+    return HTMLResponse("<h1>Staff</h1><p>Add static/staff.html for the staff detail page.</p>")
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     index_html = STATIC_DIR / "index.html"

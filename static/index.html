@@ -9,13 +9,22 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
-<body>
-  <header>
-    <h1>MT Shift Optimizer</h1>
-    <p class="tagline">จัดตารางเวร MT — ตั้งค่าวันที่และบุคลากร แล้วกดสร้างตาราง</p>
-  </header>
+<body class="app-layout">
+  <aside class="app-sidebar" aria-label="เมนูหลัก">
+    <div class="app-sidebar-header">
+      <h1 class="app-sidebar-title">MT Shift Optimizer</h1>
+    </div>
+    <nav class="app-sidebar-nav">
+      <a href="#" class="app-nav-item active" data-page="settings">ตั้งค่า</a>
+      <a href="#" class="app-nav-item" data-page="staff">บุคลากร</a>
+      <a href="#" class="app-nav-item" data-page="shifts">กะ</a>
+      <a href="#" class="app-nav-item" data-page="run">สร้างตาราง</a>
+      <a href="#" class="app-nav-item" data-page="schedule">ตารางล่าสุด</a>
+    </nav>
+  </aside>
 
-  <main>
+  <main class="app-main">
+    <div id="page-settings" class="app-page">
     <section id="settings" class="card">
       <h2>ตั้งค่าช่วงเวลา</h2>
       <div class="setting-row">
@@ -46,41 +55,67 @@
         <button type="button" id="apply_month">ใช้ทั้งเดือน</button>
       </div>
     </section>
+    </div>
 
+    <div id="page-staff" class="app-page" style="display:none">
     <section id="staff" class="card">
       <h2>บุคลากร (Staff)</h2>
-      <div class="form-inline">
+      <div class="form-inline" style="margin-bottom:1rem">
         <input type="text" id="staff_name" placeholder="ชื่อ" />
         <select id="staff_type">
           <option value="fulltime">เต็มเวลา</option>
           <option value="parttime">พาร์ทไทม์</option>
         </select>
-        <label><input type="checkbox" id="skill_donor" /> donor</label>
-        <label><input type="checkbox" id="skill_xmatch" /> xmatch</label>
         <span>วันหยุด (0-6 คั่นด้วย comma):</span>
         <input type="text" id="staff_off_days" placeholder="เช่น 5,6" size="8" />
         <button type="button" id="add_staff">เพิ่ม</button>
       </div>
-      <ul id="staff_list"></ul>
+      <div class="staff-sidebar-layout">
+        <nav id="staff_sidebar" class="staff-sidebar" aria-label="รายชื่อบุคลากร">
+          <ul id="staff_list"></ul>
+        </nav>
+        <div id="staff_detail_panel" class="staff-detail-panel">
+          <div id="staff_detail_empty" class="staff-detail-empty">เลือกบุคลากรจากรายการด้านซ้าย</div>
+          <div id="staff_detail_loading" style="display:none">กำลังโหลด...</div>
+          <div id="staff_detail_content" style="display:none"></div>
+        </div>
+      </div>
     </section>
+    </div>
 
+    <div id="page-shifts" class="app-page" style="display:none">
     <section id="shifts" class="card">
       <h2>กะ (Shifts)</h2>
-      <div class="form-inline">
-        <input type="text" id="shift_name" placeholder="ชื่อกะ" />
-        <label>donor <input type="number" id="shift_donor" min="0" value="1" size="2" /></label>
-        <label>xmatch <input type="number" id="shift_xmatch" min="0" value="1" size="2" /></label>
-        <button type="button" id="add_shift">เพิ่มกะ</button>
+      <div class="template-buttons" style="margin-bottom:0.75rem">
+        <span>โหลดจากเทมเพลต:</span>
+        <button type="button" id="template_1" class="btn-template">เทมเพลต 1 (เวรเจาะเลือด 11 ช่อง + บุคลากร)</button>
+        <button type="button" id="template_2" class="btn-template">เทมเพลต 2</button>
+        <button type="button" id="template_3" class="btn-template">เทมเพลต 3</button>
+      </div>
+      <div class="shift-form">
+        <div class="form-inline">
+          <input type="text" id="shift_name" placeholder="ชื่อกะ" />
+          <button type="button" id="add_shift">เพิ่มกะ</button>
+        </div>
+        <div class="positions-editor" style="margin-top:0.5rem">
+          <span>ช่องในกะ:</span>
+          <div id="shift_positions_list"></div>
+          <button type="button" id="add_position_row" class="small">เพิ่มช่อง</button>
+        </div>
       </div>
       <ul id="shift_list"></ul>
     </section>
+    </div>
 
+    <div id="page-run" class="app-page" style="display:none">
     <section id="run" class="card">
       <h2>สร้างตาราง</h2>
       <button type="button" id="run_schedule" class="btn-primary">สร้างตารางเวร</button>
       <p id="run_message" class="message"></p>
     </section>
+    </div>
 
+    <div id="page-schedule" class="app-page" style="display:none">
     <section id="schedule_result" class="card">
       <h2>ตารางล่าสุด</h2>
       <p id="schedule_meta"></p>
@@ -89,6 +124,7 @@
         <a id="export_csv" href="#" class="btn-secondary" style="display:none">ดาวน์โหลด CSV</a>
       </p>
     </section>
+    </div>
   </main>
 
   <script src="/static/app.js"></script>

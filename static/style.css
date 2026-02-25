@@ -25,6 +25,71 @@ body {
   font-size: 1rem;
 }
 
+/* หลายหน้า: sidebar + เนื้อหาหน้าเดียว */
+body.app-layout {
+  padding: 0;
+  display: flex;
+  min-height: 100vh;
+}
+
+.app-sidebar {
+  width: 220px;
+  min-width: 220px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.app-sidebar-header {
+  padding: 1.25rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-sidebar-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text);
+}
+
+.app-sidebar-nav {
+  padding: 0.75rem 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-nav-item {
+  display: block;
+  padding: 0.6rem 1rem;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 1rem;
+  border-left: 3px solid transparent;
+}
+
+.app-nav-item:hover {
+  background: var(--bg);
+  color: var(--accent);
+}
+
+.app-nav-item.active {
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 500;
+  border-left-color: var(--accent);
+}
+
+.app-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem 2rem;
+}
+
+.app-page {
+  max-width: 900px;
+}
+
 header {
   margin-bottom: 2rem;
 }
@@ -237,4 +302,119 @@ li button.small {
   border-radius: 6px;
   font-size: 1rem;
   color: var(--text);
+}
+
+.back-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 1rem;
+  display: inline-block;
+  margin-bottom: 0.5rem;
+}
+
+.back-link:hover {
+  text-decoration: underline;
+}
+
+.staff-detail-dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.5rem 2rem;
+  max-width: 28rem;
+}
+
+.staff-detail-dl dt {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.staff-detail-dl dd {
+  margin: 0;
+}
+
+.staff-detail-link {
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.95rem;
+  padding: 0.25rem 0.6rem;
+}
+
+.staff-detail-link:hover {
+  text-decoration: underline;
+}
+
+/* Staff sidebar layout (แบบ Notion/Coursera) */
+.staff-sidebar-layout {
+  display: flex;
+  gap: 0;
+  min-height: 240px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.staff-sidebar {
+  width: 200px;
+  min-width: 200px;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.staff-sidebar ul {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem 0;
+}
+
+.staff-sidebar .staff-sidebar-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  cursor: default;
+}
+
+.staff-sidebar .staff-sidebar-item:last-child {
+  border-bottom: none;
+}
+
+.staff-sidebar .staff-sidebar-name {
+  flex: 1;
+  cursor: pointer;
+  font-size: 1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staff-sidebar .staff-sidebar-name:hover {
+  color: var(--accent);
+}
+
+.staff-sidebar .staff-sidebar-item.active {
+  background: var(--accent-light);
+}
+
+.staff-sidebar .staff-sidebar-item.active .staff-sidebar-name {
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.staff-detail-panel {
+  flex: 1;
+  padding: 1rem 1.25rem;
+  background: var(--surface);
+  overflow-y: auto;
+}
+
+.staff-detail-empty {
+  color: var(--muted);
+  font-size: 1rem;
 }

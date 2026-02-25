@@ -33,21 +33,77 @@ async function loadLatestSchedule() {
   return r.json();
 }
 
+const DAY_NAMES = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"];
+
+function renderStaffDetailContent(staff) {
+  const typeLabel = staff.type === "fulltime" ? "เต็มเวลา" : "พาร์ทไทม์";
+  const offLabel = staff.off_days && staff.off_days.length
+    ? staff.off_days.map((d) => (DAY_NAMES[d] != null ? DAY_NAMES[d] : "วัน " + d)).join(", ")
+    : "ไม่มี";
+  const skillsLabel = staff.skills && staff.skills.length ? staff.skills.join(", ") : "—";
+  return (
+    "<dl class=\"staff-detail-dl\">" +
+    "<dt>ชื่อ</dt><dd>" + escapeHtml(staff.name) + "</dd>" +
+    "<dt>ประเภท</dt><dd>" + escapeHtml(typeLabel) + "</dd>" +
+    "<dt>วันหยุด (0–6)</dt><dd>" + escapeHtml(offLabel) + "</dd>" +
+    "<dt>Skills</dt><dd>" + escapeHtml(skillsLabel) + "</dd>" +
+    "</dl>"
+  );
+}
+
+async function showStaffDetail(staffId) {
+  const loadingEl = document.getElementById("staff_detail_loading");
+  const contentEl = document.getElementById("staff_detail_content");
+  const emptyEl = document.getElementById("staff_detail_empty");
+  emptyEl.style.display = "none";
+  contentEl.style.display = "none";
+  loadingEl.style.display = "block";
+  contentEl.innerHTML = "";
+
+  document.querySelectorAll("#staff_list li").forEach((li) => {
+    li.classList.toggle("active", parseInt(li.dataset.id, 10) === staffId);
+  });
+
+  try {
+    const r = await fetch(API + "/staff/" + staffId);
+    if (!r.ok) {
+      contentEl.innerHTML = "<p class=\"message error\">โหลดข้อมูลไม่สำเร็จ</p>";
+      contentEl.style.display = "";
+      loadingEl.style.display = "none";
+      return;
+    }
+    const staff = await r.json();
+    contentEl.innerHTML = renderStaffDetailContent(staff);
+    contentEl.style.display = "";
+  } catch (e) {
+    contentEl.innerHTML = "<p class=\"message error\">เกิดข้อผิดพลาด: " + escapeHtml(e.message) + "</p>";
+    contentEl.style.display = "";
+  }
+  loadingEl.style.display = "none";
+}
+
 function renderStaffList(items) {
   const ul = document.getElementById("staff_list");
   ul.innerHTML = items
     .map(
       (s) =>
-        `<li data-id="${s.id}">
-          <span class="name">${escapeHtml(s.name)} (${s.type}) — skills: ${(s.skills || []).join(", ") || "-"} | off: [${(s.off_days || []).join(", ")}]</span>
-          <button class="small btn-delete-staff" data-id="${s.id}">ลบ</button>
+        `<li data-id="${s.id}" class="staff-sidebar-item">
+          <span class="staff-sidebar-name">${escapeHtml(s.name)}</span>
+          <button type="button" class="small btn-delete-staff" data-id="${s.id}" title="ลบ">ลบ</button>
         </li>`
     )
     .join("");
+  ul.querySelectorAll(".staff-sidebar-item").forEach((li) => {
+    const id = parseInt(li.dataset.id, 10);
+    li.querySelector(".staff-sidebar-name").addEventListener("click", () => showStaffDetail(id));
+  });
   ul.querySelectorAll(".btn-delete-staff").forEach((btn) => {
-    btn.addEventListener("click", async () => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
       if (!confirm("ลบคนนี้?")) return;
       await fetch(API + "/staff/" + btn.dataset.id, { method: "DELETE" });
+      document.getElementById("staff_detail_empty").style.display = "";
+      document.getElementById("staff_detail_content").style.display = "none";
       refreshStaff();
     });
   });
@@ -56,13 +112,15 @@ function renderStaffList(items) {
 function renderShiftList(items) {
   const ul = document.getElementById("shift_list");
   ul.innerHTML = items
-    .map(
-      (s) =>
-        `<li data-id="${s.id}">
-          <span class="name">${escapeHtml(s.name)} — donor: ${s.donor}, xmatch: ${s.xmatch}</span>
+    .map((s) => {
+      const posLabel = s.positions && s.positions.length
+        ? s.positions.map((p) => (typeof p === "string" ? p : p.name)).join(", ")
+        : `donor: ${s.donor ?? 0}, xmatch: ${s.xmatch ?? 0}`;
+      return `<li data-id="${s.id}">
+          <span class="name">${escapeHtml(s.name)} — ${escapeHtml(posLabel)}</span>
           <button class="small btn-delete-shift" data-id="${s.id}">ลบ</button>
-        </li>`
-    )
+        </li>`;
+    })
     .join("");
   ul.querySelectorAll(".btn-delete-shift").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -101,30 +159,45 @@ function renderSchedule(data) {
 
   const days = [];
   for (let d = 0; d < displayDays; d++) days.push(d);
-  const shiftNames = [...new Set(data.slots.map((s) => s.shift_name))].sort();
-  const byDayShiftRoom = {};
+  const posKey = data.slots.length && data.slots[0].position != null ? "position" : "room";
+  const byDayShiftPos = {};
   data.slots.forEach((s) => {
-    const key = `${s.day}-${s.shift_name}-${s.room}`;
-    if (!byDayShiftRoom[key]) byDayShiftRoom[key] = [];
-    byDayShiftRoom[key].push(s.staff_name);
+    const pos = s[posKey] || s.room || s.position || "";
+    const key = `${s.day}-${s.shift_name}-${pos}`;
+    if (!byDayShiftPos[key]) byDayShiftPos[key] = [];
+    const cell = s.time_window ? `${s.staff_name} (${s.time_window})` : s.staff_name;
+    byDayShiftPos[key].push(cell);
   });
+  const shiftPositions = {};
+  data.slots.forEach((s) => {
+    const sn = s.shift_name;
+    const pos = s[posKey] || s.room || s.position || "";
+    if (!shiftPositions[sn]) shiftPositions[sn] = [];
+    if (!shiftPositions[sn].includes(pos)) shiftPositions[sn].push(pos);
+  });
+  const shiftNames = Object.keys(shiftPositions).sort();
+  shiftNames.forEach((sn) => shiftPositions[sn].sort());
 
   let html = "<table><thead><tr><th>วัน</th>";
   shiftNames.forEach((sn) => {
-    html += `<th colspan="2">${escapeHtml(sn)}</th>`;
+    const cols = (shiftPositions[sn] || []).length || 1;
+    html += `<th colspan="${cols}">${escapeHtml(sn)}</th>`;
   });
   html += "</tr><tr><th></th>";
-  shiftNames.forEach(() => {
-    html += "<th>Donor</th><th>Xmatch</th>";
+  shiftNames.forEach((sn) => {
+    (shiftPositions[sn] || ["ช่อง"]).forEach((pos) => {
+      html += `<th>${escapeHtml(pos)}</th>`;
+    });
   });
   html += "</tr></thead><tbody>";
   days.forEach((day) => {
     const dayLabel = formatDayLabel(day, startDate);
     html += `<tr><td>${escapeHtml(dayLabel)}</td>`;
     shiftNames.forEach((sn) => {
-      const donor = (byDayShiftRoom[`${day}-${sn}-donor`] || []).join(", ");
-      const xmatch = (byDayShiftRoom[`${day}-${sn}-xmatch`] || []).join(", ");
-      html += `<td>${escapeHtml(donor)}</td><td>${escapeHtml(xmatch)}</td>`;
+      (shiftPositions[sn] || []).forEach((pos) => {
+        const cell = (byDayShiftPos[`${day}-${sn}-${pos}`] || []).join(", ");
+        html += `<td>${escapeHtml(cell)}</td>`;
+      });
     });
     html += "</tr>";
   });
@@ -223,22 +296,60 @@ document.getElementById("add_staff").addEventListener("click", async () => {
     return;
   }
   const type = document.getElementById("staff_type").value;
-  const skills = [];
-  if (document.getElementById("skill_donor").checked) skills.push("donor");
-  if (document.getElementById("skill_xmatch").checked) skills.push("xmatch");
   const offDaysStr = document.getElementById("staff_off_days").value.trim();
   const off_days = offDaysStr ? offDaysStr.split(",").map((x) => parseInt(x.trim(), 10)).filter((n) => !isNaN(n)) : [];
   await fetch(API + "/staff", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, type, off_days: off_days, skills }),
+    body: JSON.stringify({ name, type, off_days: off_days, skills: [] }),
   });
   document.getElementById("staff_name").value = "";
   document.getElementById("staff_off_days").value = "";
-  document.getElementById("skill_donor").checked = false;
-  document.getElementById("skill_xmatch").checked = false;
   refreshStaff();
 });
+
+function addPositionRow(name = "", note = "") {
+  const list = document.getElementById("shift_positions_list");
+  const div = document.createElement("div");
+  div.className = "shift-position-row";
+  div.style.marginBottom = "0.25rem";
+  const nameIn = document.createElement("input");
+  nameIn.type = "text";
+  nameIn.className = "position-name";
+  nameIn.placeholder = "ชื่อช่อง";
+  nameIn.size = 12;
+  nameIn.value = name;
+  const noteIn = document.createElement("input");
+  noteIn.type = "text";
+  noteIn.className = "position-note";
+  noteIn.placeholder = "หมายเหตุ (ถ้ามี)";
+  noteIn.size = 20;
+  noteIn.value = note;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "small btn-remove-position";
+  btn.textContent = "ลบ";
+  btn.addEventListener("click", () => div.remove());
+  div.appendChild(nameIn);
+  div.appendChild(document.createTextNode(" "));
+  div.appendChild(noteIn);
+  div.appendChild(document.createTextNode(" "));
+  div.appendChild(btn);
+  list.appendChild(div);
+}
+
+function collectShiftPositions() {
+  const rows = document.querySelectorAll("#shift_positions_list .shift-position-row");
+  const positions = [];
+  rows.forEach((row) => {
+    const name = (row.querySelector(".position-name") && row.querySelector(".position-name").value.trim()) || "";
+    const note = (row.querySelector(".position-note") && row.querySelector(".position-note").value.trim()) || "";
+    if (name) positions.push({ name, constraint_note: note, regular_only: false });
+  });
+  return positions;
+}
+
+document.getElementById("add_position_row").addEventListener("click", () => addPositionRow());
 
 document.getElementById("add_shift").addEventListener("click", async () => {
   const name = document.getElementById("shift_name").value.trim();
@@ -246,16 +357,33 @@ document.getElementById("add_shift").addEventListener("click", async () => {
     alert("กรอกชื่อกะ");
     return;
   }
-  const donor = parseInt(document.getElementById("shift_donor").value, 10) || 1;
-  const xmatch = parseInt(document.getElementById("shift_xmatch").value, 10) || 1;
+  let positions = collectShiftPositions();
+  if (positions.length === 0) positions = [{ name: "ช่อง 1", constraint_note: "", regular_only: false }];
   await fetch(API + "/shifts", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, donor, xmatch }),
+    body: JSON.stringify({ name, positions }),
   });
   document.getElementById("shift_name").value = "";
+  document.getElementById("shift_positions_list").innerHTML = "";
+  addPositionRow();
   refreshShifts();
 });
+
+async function applyTemplate(templateId) {
+  const r = await fetch(API + "/apply-template?template=" + templateId, { method: "POST" });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    alert(d.detail || r.statusText || "โหลดเทมเพลตไม่สำเร็จ");
+    return;
+  }
+  await refreshStaff();
+  await refreshShifts();
+}
+
+document.getElementById("template_1").addEventListener("click", () => applyTemplate(1));
+document.getElementById("template_2").addEventListener("click", () => applyTemplate(2));
+document.getElementById("template_3").addEventListener("click", () => applyTemplate(3));
 
 document.getElementById("run_schedule").addEventListener("click", async () => {
   const msg = document.getElementById("run_message");
@@ -315,14 +443,33 @@ document.getElementById("run_schedule").addEventListener("click", async () => {
     msg.className = "message success";
     await refreshSettings();
     refreshSchedule();
+    showPage("schedule");
   } catch (e) {
     msg.textContent = "Error: " + e.message;
     msg.className = "message error";
   }
 });
 
+function showPage(pageId) {
+  document.querySelectorAll(".app-page").forEach((el) => {
+    el.style.display = el.id === "page-" + pageId ? "" : "none";
+  });
+  document.querySelectorAll(".app-nav-item").forEach((a) => {
+    a.classList.toggle("active", a.dataset.page === pageId);
+  });
+}
+
+document.querySelectorAll(".app-nav-item").forEach((a) => {
+  a.addEventListener("click", (e) => {
+    e.preventDefault();
+    showPage(a.dataset.page);
+  });
+});
+
 async function init() {
   fillPresetYear();
+  addPositionRow();
+  showPage("settings");
   await refreshSettings();
   await refreshStaff();
   await refreshShifts();

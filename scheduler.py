@@ -11,69 +11,91 @@ def generate_schedule(num_days=None):
         num_days = get_num_days()
     model = cp_model.CpModel()
 
-    # shifts[(mt, day, shift)] = ทำกะนี้ไหม
-    shifts = {}
+    # assign[(mt, day, shift_name, position)] = 1 if mt is assigned to (day, shift, position)
+    assign = {}
     for mt in mt_list:
         for day in range(num_days):
             for shift in shift_list:
-                shifts[(mt["name"], day, shift["name"])] = model.new_bool_var(f"{mt['name']}_day{day}_{shift['name']}")
+                for pos in shift["positions"]:
+                    pos_name = pos["name"] if isinstance(pos, dict) else pos
+                    assign[(mt["name"], day, shift["name"], pos_name)] = model.new_bool_var(
+                        f"{mt['name']}_d{day}_{shift['name']}_{pos_name}"
+                    )
 
-    # rooms[(mt, day, shift, room)] = อยู่ห้องนี้ไหม
-    rooms = {}
-    for mt in mt_list:
-        for day in range(num_days):
-            for shift in shift_list:
-                for room in ["donor", "xmatch"]:
-                    rooms[(mt["name"], day, shift["name"], room)] = model.new_bool_var(f"{mt['name']}_day{day}_{shift['name']}_{room}")
-
-    # ถ้าทำกะนี้ → ต้องอยู่ห้องใดห้องหนึ่ง
-    for mt in mt_list:
-        for day in range(num_days):
-            for shift in shift_list:
-                model.add(
-                    rooms[(mt["name"], day, shift["name"], "donor")] +
-                    rooms[(mt["name"], day, shift["name"], "xmatch")] ==
-                    shifts[(mt["name"], day, shift["name"])]
-                )
-
-    # ห้ามอยู่ห้องที่ไม่มี skill
-    for mt in mt_list:
-        for day in range(num_days):
-            for shift in shift_list:
-                for room in ["donor", "xmatch"]:
-                    if room not in mt["skills"]:
-                        model.add(rooms[(mt["name"], day, shift["name"], room)] == 0)
-
-    # แต่ละคนทำได้แค่ 1 กะต่อวัน
-    for mt in mt_list:
-        for day in range(num_days):
-            model.add(sum(shifts[(mt["name"], day, shift["name"])] for shift in shift_list) <= 1)
-
-    # ห้ามทำงานในวันหยุด
-    for mt in mt_list:
-        for day in mt["off_days"]:
-            for shift in shift_list:
-                model.add(shifts[(mt["name"], day, shift["name"])] == 0)
-
-    # แต่ละห้องต้องมี MT ครบ
+    # Each (day, shift, position) gets exactly one staff
     for day in range(num_days):
         for shift in shift_list:
-            model.add(sum(rooms[(mt["name"], day, shift["name"], "donor")] for mt in mt_list) == shift["donor"])
-            model.add(sum(rooms[(mt["name"], day, shift["name"], "xmatch")] for mt in mt_list) == shift["xmatch"])
+            for pos in shift["positions"]:
+                pos_name = pos["name"] if isinstance(pos, dict) else pos
+                model.add(
+                    sum(assign[(mt["name"], day, shift["name"], pos_name)] for mt in mt_list)
+                    == 1
+                )
 
-    # กระจายเวรให้เท่ากัน
-    total_shifts = []
+    # Each staff at most one assignment per day (across all shifts/positions)
     for mt in mt_list:
-        total = sum(shifts[(mt["name"], day, shift["name"])] for day in range(num_days) for shift in shift_list)
-        total_shifts.append(total)
+        for day in range(num_days):
+            model.add(
+                sum(
+                    assign[(mt["name"], day, shift["name"], pos["name"] if isinstance(pos, dict) else pos)]
+                    for shift in shift_list
+                    for pos in shift["positions"]
+                )
+                <= 1
+            )
 
-    max_s = model.new_int_var(0, num_days * len(shift_list), "max_s")
-    min_s = model.new_int_var(0, num_days * len(shift_list), "min_s")
-    model.add_max_equality(max_s, total_shifts)
-    model.add_min_equality(min_s, total_shifts)
+    # Off days: no assignment
+    for mt in mt_list:
+        for day in mt["off_days"]:
+            if day < num_days:
+                for shift in shift_list:
+                    for pos in shift["positions"]:
+                        pos_name = pos["name"] if isinstance(pos, dict) else pos
+                        model.add(assign[(mt["name"], day, shift["name"], pos_name)] == 0)
+
+    # regular_only: only fulltime staff for positions with regular_only
+    for shift in shift_list:
+        for pos in shift["positions"]:
+            if isinstance(pos, dict) and pos.get("regular_only"):
+                pos_name = pos["name"]
+                for mt in mt_list:
+                    if mt.get("type") != "fulltime":
+                        for day in range(num_days):
+                            model.add(assign[(mt["name"], day, shift["name"], pos_name)] == 0)
+
+    # Balance: minimize (max - min) assignments per staff
+    total_per_mt = []
+    for mt in mt_list:
+        total = sum(
+            assign[(mt["name"], day, shift["name"], pos["name"] if isinstance(pos, dict) else pos)]
+            for day in range(num_days)
+            for shift in shift_list
+            for pos in shift["positions"]
+        )
+        total_per_mt.append(total)
+    n_slots = sum(len(s["positions"]) for s in shift_list) * num_days
+    max_s = model.new_int_var(0, n_slots, "max_s")
+    min_s = model.new_int_var(0, n_slots, "min_s")
+    model.add_max_equality(max_s, total_per_mt)
+    model.add_min_equality(min_s, total_per_mt)
     model.minimize(max_s - min_s)
 
     solver = cp_model.CpSolver()
     status = solver.solve(model)
 
-    return shifts, rooms, solver, status
+    # Build slots list: (staff_name, day, shift_name, position)
+    slots = []
+    for day in range(num_days):
+        for shift in shift_list:
+            for pos in shift["positions"]:
+                pos_name = pos["name"] if isinstance(pos, dict) else pos
+                for mt in mt_list:
+                    if solver.value(assign[(mt["name"], day, shift["name"], pos_name)]) == 1:
+                        slots.append({
+                            "staff_name": mt["name"],
+                            "day": day,
+                            "shift_name": shift["name"],
+                            "position": pos_name,
+                        })
+                        break
+    return slots, solver, status
