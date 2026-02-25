@@ -1,0 +1,8 @@
+{"sessionId":"73c15e","location":"app.js:apply_month","message":"apply_month","data":{"lastDay":28,"first":"2026-02-01"},"timestamp":1772031375625,"hypothesisId":"A"}
+{"sessionId":"73c15e","location":"app.js:run_schedule","message":"before POST run","data":{"numDaysRaw":"28","num_days":28,"payload":{"num_days":28,"schedule_start_date":"2026-02-01"}},"timestamp":1772031377845,"hypothesisId":"A"}
+{"sessionId":"73c15e","location":"app.js:apply_month","message":"apply_month","data":{"lastDay":31,"first":"2026-01-01"},"timestamp":1772031455640,"hypothesisId":"A"}
+{"sessionId":"73c15e","location":"app.js:run_schedule","message":"before POST run","data":{"fromPreset":true,"num_days":31,"payload":{"num_days":31,"schedule_start_date":"2026-01-01"}},"timestamp":1772031477850,"hypothesisId":"A"}
+{"sessionId":"73c15e","location":"app.js:apply_month","message":"apply_month","data":{"lastDay":31,"first":"2026-01-01"},"timestamp":1772031482816,"hypothesisId":"A"}
+{"sessionId":"73c15e","location":"app.js:run_schedule","message":"before POST run","data":{"fromPreset":true,"num_days":31,"payload":{"num_days":31,"schedule_start_date":"2026-01-01"}},"timestamp":1772031484442,"hypothesisId":"A"}
+{"sessionId":"73c15e","location":"app.js:apply_month","message":"apply_month","data":{"lastDay":31,"first":"2026-01-01"},"timestamp":1772031563828,"hypothesisId":"A"}
+{"sessionId":"73c15e","location":"app.js:run_schedule","message":"before POST run","data":{"fromPreset":true,"num_days":31,"payload":{"num_days":31,"schedule_start_date":"2026-01-01"}},"timestamp":1772031565404,"hypothesisId":"A"}

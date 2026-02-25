@@ -1,0 +1,240 @@
+:root {
+  --bg: #f5f9f5;
+  --surface: #ffffff;
+  --border: #c8e0c8;
+  --text: #1a2e1a;
+  --muted: #4a5d4a;
+  --accent: #2e7d32;
+  --accent-hover: #388e3c;
+  --accent-light: #e8f5e9;
+  --success: #2e7d32;
+  --danger: #c62828;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Sarabun", "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  padding: 1.25rem 2rem;
+  line-height: 1.6;
+  font-size: 1rem;
+}
+
+header {
+  margin-bottom: 2rem;
+}
+
+header h1 {
+  font-size: 1.6rem;
+  font-weight: 600;
+  margin: 0 0 0.35rem 0;
+  color: var(--text);
+}
+
+.tagline {
+  color: var(--muted);
+  margin: 0;
+  font-size: 1rem;
+}
+
+main {
+  max-width: 920px;
+  margin: 0 auto;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.35rem;
+  margin-bottom: 1.35rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.card h2 {
+  font-size: 1.15rem;
+  margin: 0 0 1rem 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.setting-row label {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.form-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.form-inline input[type="text"],
+.form-inline input[type="number"],
+.form-inline input[type="date"],
+.form-inline select {
+  padding: 0.5rem 0.65rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.form-inline input:focus,
+.form-inline select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-light);
+}
+
+.form-inline label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text);
+}
+
+button {
+  padding: 0.5rem 1rem;
+  background: var(--accent-light);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+button:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--surface);
+  border-color: var(--accent);
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--surface);
+}
+
+.btn-secondary {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.btn-secondary:hover {
+  text-decoration: underline;
+}
+
+.message {
+  margin: 0.6rem 0 0 0;
+  font-size: 1rem;
+}
+
+.message.error {
+  color: var(--danger);
+}
+
+.message.success {
+  color: var(--success);
+}
+
+ul#staff_list,
+ul#shift_list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+ul#staff_list li,
+ul#shift_list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 1rem;
+}
+
+ul#staff_list li:last-child,
+ul#shift_list li:last-child {
+  border-bottom: none;
+}
+
+li .name {
+  flex: 1;
+}
+
+li button.small {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.9rem;
+}
+
+#schedule_table_wrap {
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+
+#schedule_table_wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 1rem;
+}
+
+#schedule_table_wrap th,
+#schedule_table_wrap td {
+  border: 1px solid var(--border);
+  padding: 0.6rem 0.85rem;
+  text-align: left;
+  background: var(--surface);
+  color: var(--text);
+}
+
+#schedule_table_wrap th {
+  background: var(--accent-light);
+  color: var(--text);
+  font-weight: 600;
+}
+
+#schedule_meta {
+  color: var(--muted);
+  font-size: 1rem;
+  margin: 0 0 0.5rem 0;
+}
+
+.month-preset {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.month-preset select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 1rem;
+  color: var(--text);
+}

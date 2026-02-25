@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MT Shift Optimizer</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <header>
+    <h1>MT Shift Optimizer</h1>
+    <p class="tagline">จัดตารางเวร MT — ตั้งค่าวันที่และบุคลากร แล้วกดสร้างตาราง</p>
+  </header>
+
+  <main>
+    <section id="settings" class="card">
+      <h2>ตั้งค่าช่วงเวลา</h2>
+      <div class="setting-row">
+        <label for="schedule_start_date">วันเริ่มต้น:</label>
+        <input type="date" id="schedule_start_date" />
+        <label for="num_days">จำนวนวัน:</label>
+        <input type="number" id="num_days" min="1" max="31" value="7" style="width:4rem" />
+        <button type="button" id="save_settings">บันทึก</button>
+      </div>
+      <div class="month-preset" style="margin-top:0.75rem">
+        <span>หรือใช้ทั้งเดือน:</span>
+        <select id="preset_month">
+          <option value="">-- เลือกเดือน --</option>
+          <option value="1">มกราคม</option>
+          <option value="2">กุมภาพันธ์</option>
+          <option value="3">มีนาคม</option>
+          <option value="4">เมษายน</option>
+          <option value="5">พฤษภาคม</option>
+          <option value="6">มิถุนายน</option>
+          <option value="7">กรกฎาคม</option>
+          <option value="8">สิงหาคม</option>
+          <option value="9">กันยายน</option>
+          <option value="10">ตุลาคม</option>
+          <option value="11">พฤศจิกายน</option>
+          <option value="12">ธันวาคม</option>
+        </select>
+        <select id="preset_year"></select>
+        <button type="button" id="apply_month">ใช้ทั้งเดือน</button>
+      </div>
+    </section>
+
+    <section id="staff" class="card">
+      <h2>บุคลากร (Staff)</h2>
+      <div class="form-inline">
+        <input type="text" id="staff_name" placeholder="ชื่อ" />
+        <select id="staff_type">
+          <option value="fulltime">เต็มเวลา</option>
+          <option value="parttime">พาร์ทไทม์</option>
+        </select>
+        <label><input type="checkbox" id="skill_donor" /> donor</label>
+        <label><input type="checkbox" id="skill_xmatch" /> xmatch</label>
+        <span>วันหยุด (0-6 คั่นด้วย comma):</span>
+        <input type="text" id="staff_off_days" placeholder="เช่น 5,6" size="8" />
+        <button type="button" id="add_staff">เพิ่ม</button>
+      </div>
+      <ul id="staff_list"></ul>
+    </section>
+
+    <section id="shifts" class="card">
+      <h2>กะ (Shifts)</h2>
+      <div class="form-inline">
+        <input type="text" id="shift_name" placeholder="ชื่อกะ" />
+        <label>donor <input type="number" id="shift_donor" min="0" value="1" size="2" /></label>
+        <label>xmatch <input type="number" id="shift_xmatch" min="0" value="1" size="2" /></label>
+        <button type="button" id="add_shift">เพิ่มกะ</button>
+      </div>
+      <ul id="shift_list"></ul>
+    </section>
+
+    <section id="run" class="card">
+      <h2>สร้างตาราง</h2>
+      <button type="button" id="run_schedule" class="btn-primary">สร้างตารางเวร</button>
+      <p id="run_message" class="message"></p>
+    </section>
+
+    <section id="schedule_result" class="card">
+      <h2>ตารางล่าสุด</h2>
+      <p id="schedule_meta"></p>
+      <div id="schedule_table_wrap"></div>
+      <p>
+        <a id="export_csv" href="#" class="btn-secondary" style="display:none">ดาวน์โหลด CSV</a>
+      </p>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
