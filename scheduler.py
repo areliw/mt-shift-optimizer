@@ -128,8 +128,14 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
     holiday_set = _parse_holiday_dates(get_holiday_dates())
 
     def available_on_day(mt, day):
-        if day in (mt.get("off_days") or []):
-            return False
+        off_weekdays = set(mt.get("off_days") or [])
+        if off_weekdays:
+            if start_date:
+                cal = start_date + timedelta(days=day)
+                if cal.weekday() in off_weekdays:
+                    return False
+            elif day % 7 in off_weekdays:
+                return False
         if start_date and (mt.get("off_days_of_month") or []):
             cal = start_date + timedelta(days=day)
             if cal.day in mt["off_days_of_month"]:
@@ -261,9 +267,18 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
                 <= 1
             )
 
+    # off_days = วันหยุดประจำสัปดาห์ (0=จันทร์ … 6=อาทิตย์) — ห้ามจัดทุกวันที่มี weekday นี้
     for mt in mt_list:
-        for day in mt["off_days"]:
-            if day < num_days:
+        off_weekdays = set(mt.get("off_days") or [])
+        if not off_weekdays:
+            continue
+        for day in range(num_days):
+            if start_date:
+                cal_date = start_date + timedelta(days=day)
+                weekday = cal_date.weekday()
+            else:
+                weekday = day % 7
+            if weekday in off_weekdays:
                 for shift, pos, pos_name, slot_i in expanded:
                     model.add(assign[(mt["name"], day, shift["name"], pos_name, slot_i)] == 0)
 

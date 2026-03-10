@@ -58,7 +58,8 @@ from scheduler import generate_schedule, diagnose_infeasible, DUMMY_WORKER
 from ortools.sat.python import cp_model
 
 init_db()
-clear_all()
+# ไม่เรียก clear_all() ตอน startup — ป้องกันล้างข้อมูลเมื่อ deploy (Railway/restart)
+# ถ้าต้องการล้างมือให้ใช้ปุ่มใน UI หรือเรียก API
 
 app = FastAPI(title="MT Shift Optimizer")
 

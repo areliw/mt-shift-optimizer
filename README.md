@@ -25,6 +25,17 @@ python main.py
 
 จากนั้นเปิดเบราว์เซอร์ที่ **http://localhost:8000** (อย่าใช้ 0.0.0.0:8000 — บน Windows จะเปิดไม่ได้)
 
+## Deploy บน Railway
+
+1. **ติดตั้ง Railway CLI** (ถ้ายังไม่มี): `winget install Railway.cli` หรือดู [railway.com](https://railway.com)
+2. **Login**: `railway login`
+3. **สร้างโปรเจกต์**: ในโฟลเดอร์โปรเจกต์ รัน `railway init` แล้วเลือกสร้างโปรเจกต์ใหม่หรือเชื่อมกับที่มี
+4. **Deploy**: `railway up` (อัปโหลดโค้ดแล้ว build/run ตาม Procfile)
+
+หรือ **เชื่อม GitHub**: ใน [Railway Dashboard](https://railway.app/dashboard) → New Project → Deploy from GitHub repo → เลือก repo นี้ ระบบจะ build จาก `requirements.txt` และรันตาม Procfile (`web: uvicorn main:app --host 0.0.0.0 --port $PORT`)
+
+หมายเหตุ: ข้อมูลเก็บใน SQLite ในเครื่องของ Railway — ถ้า redeploy หรือ restart ข้อมูลอาจหาย ถ้าต้องการเก็บถาวรให้เพิ่ม Volume ใน Railway หรือเปลี่ยนไปใช้ DB ภายนอก
+
 ## วิธีใช้
 
 1. **ตั้งค่า** — กำหนดจำนวนวัน (num_days) แล้วกดบันทึก
