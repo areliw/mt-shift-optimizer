@@ -12,121 +12,294 @@
 <body class="app-layout">
   <aside class="app-sidebar" aria-label="เมนูหลัก">
     <div class="app-sidebar-header">
-      <h1 class="app-sidebar-title">MT Shift Optimizer</h1>
+      <h1 class="app-sidebar-title">MT Shift</h1>
+      <div class="app-sidebar-subtitle">Optimizer</div>
     </div>
     <nav class="app-sidebar-nav">
-      <a href="#" class="app-nav-item active" data-page="settings">ตั้งค่า</a>
-      <a href="#" class="app-nav-item" data-page="staff">บุคลากร</a>
-      <a href="#" class="app-nav-item" data-page="shifts">กะ</a>
-      <a href="#" class="app-nav-item" data-page="run">สร้างตาราง</a>
-      <a href="#" class="app-nav-item" data-page="schedule">ตารางล่าสุด</a>
+      <a href="#" class="app-nav-item active" data-page="home">⌂ หน้าหลัก</a>
+      <a href="#" class="app-nav-item" data-page="skills">◈ ทักษะ &amp; ช่วงเวลา <span class="nav-badge" id="nav_badge_skills">0</span></a>
+      <a href="#" class="app-nav-item" data-page="staff">◎ บุคลากร <span class="nav-badge" id="nav_badge_staff">0</span></a>
+      <a href="#" class="app-nav-item" data-page="shifts">☰ กะ <span class="nav-badge" id="nav_badge_shifts">0</span></a>
+      <a href="#" class="app-nav-item" data-page="schedule">▦ ตารางล่าสุด</a>
     </nav>
   </aside>
 
   <main class="app-main">
-    <div id="page-settings" class="app-page">
-    <section id="settings" class="card">
-      <h2>ตั้งค่าช่วงเวลา</h2>
-      <div class="setting-row">
-        <label for="schedule_start_date">วันเริ่มต้น:</label>
-        <input type="date" id="schedule_start_date" />
-        <label for="num_days">จำนวนวัน:</label>
-        <input type="number" id="num_days" min="1" max="31" value="7" style="width:4rem" />
-        <button type="button" id="save_settings">บันทึก</button>
-      </div>
-      <div class="month-preset" style="margin-top:0.75rem">
-        <span>หรือใช้ทั้งเดือน:</span>
-        <select id="preset_month">
-          <option value="">-- เลือกเดือน --</option>
-          <option value="1">มกราคม</option>
-          <option value="2">กุมภาพันธ์</option>
-          <option value="3">มีนาคม</option>
-          <option value="4">เมษายน</option>
-          <option value="5">พฤษภาคม</option>
-          <option value="6">มิถุนายน</option>
-          <option value="7">กรกฎาคม</option>
-          <option value="8">สิงหาคม</option>
-          <option value="9">กันยายน</option>
-          <option value="10">ตุลาคม</option>
-          <option value="11">พฤศจิกายน</option>
-          <option value="12">ธันวาคม</option>
-        </select>
-        <select id="preset_year"></select>
-        <button type="button" id="apply_month">ใช้ทั้งเดือน</button>
-      </div>
-    </section>
-    </div>
 
-    <div id="page-staff" class="app-page" style="display:none">
-    <section id="staff" class="card">
-      <h2>บุคลากร (Staff)</h2>
-      <div class="form-inline" style="margin-bottom:1rem">
-        <input type="text" id="staff_name" placeholder="ชื่อ" />
-        <select id="staff_type">
-          <option value="fulltime">เต็มเวลา</option>
-          <option value="parttime">พาร์ทไทม์</option>
-        </select>
-        <span>วันหยุด (0-6 คั่นด้วย comma):</span>
-        <input type="text" id="staff_off_days" placeholder="เช่น 5,6" size="8" />
-        <button type="button" id="add_staff">เพิ่ม</button>
-      </div>
-      <div class="staff-sidebar-layout">
-        <nav id="staff_sidebar" class="staff-sidebar" aria-label="รายชื่อบุคลากร">
-          <ul id="staff_list"></ul>
-        </nav>
-        <div id="staff_detail_panel" class="staff-detail-panel">
-          <div id="staff_detail_empty" class="staff-detail-empty">เลือกบุคลากรจากรายการด้านซ้าย</div>
-          <div id="staff_detail_loading" style="display:none">กำลังโหลด...</div>
-          <div id="staff_detail_content" style="display:none"></div>
+    <!-- ===== HOME ===== -->
+    <div id="page-home" class="app-page">
+      <header class="page-header">
+        <h1>หน้าหลัก</h1>
+      </header>
+      <div id="home_process_steps" class="process-steps" aria-label="ขั้นตอนการทำงาน"></div>
+      <section id="settings" class="card card-step">
+        <h2>ช่วงเวลา</h2>
+        <div class="setting-row">
+          <label for="schedule_start_date">วันเริ่มต้น</label>
+          <input type="date" id="schedule_start_date" />
+          <label for="num_days">จำนวนวัน</label>
+          <input type="number" id="num_days" min="1" max="31" value="7" style="width:4.5rem" />
+          <button type="button" id="save_settings" class="btn-primary">บันทึก</button>
         </div>
-      </div>
-    </section>
-    </div>
-
-    <div id="page-shifts" class="app-page" style="display:none">
-    <section id="shifts" class="card">
-      <h2>กะ (Shifts)</h2>
-      <div class="template-buttons" style="margin-bottom:0.75rem">
-        <span>โหลดจากเทมเพลต:</span>
-        <button type="button" id="template_1" class="btn-template">เทมเพลต 1 (เวรเจาะเลือด 11 ช่อง + บุคลากร)</button>
-        <button type="button" id="template_2" class="btn-template">เทมเพลต 2</button>
-        <button type="button" id="template_3" class="btn-template">เทมเพลต 3</button>
-      </div>
-      <div class="shift-form">
+        <div class="month-preset">
+          <span>หรือใช้ทั้งเดือน</span>
+          <select id="preset_month">
+            <option value="">-- เลือกเดือน --</option>
+            <option value="1">มกราคม</option>
+            <option value="2">กุมภาพันธ์</option>
+            <option value="3">มีนาคม</option>
+            <option value="4">เมษายน</option>
+            <option value="5">พฤษภาคม</option>
+            <option value="6">มิถุนายน</option>
+            <option value="7">กรกฎาคม</option>
+            <option value="8">สิงหาคม</option>
+            <option value="9">กันยายน</option>
+            <option value="10">ตุลาคม</option>
+            <option value="11">พฤศจิกายน</option>
+            <option value="12">ธันวาคม</option>
+          </select>
+          <select id="preset_year"></select>
+          <button type="button" id="apply_month">ใช้ทั้งเดือน</button>
+        </div>
+        <div style="margin-top:.75rem">
+          <label style="font-weight:600; margin-bottom:.35rem; display:block">วันหยุดราชการ <span class="text-muted" style="font-weight:400">(คลิกเลือกวันที่)</span></label>
+          <div id="holiday_calendar" class="holiday-calendar"></div>
+          <input type="hidden" id="holiday_dates" />
+          <button type="button" id="save_holidays" class="btn-primary" style="margin-top:.5rem">บันทึกวันหยุด</button>
+          <span id="holiday_save_msg" class="text-muted" style="font-size:.82rem; margin-left:.5rem"></span>
+        </div>
+      </section>
+      <section id="run" class="card card-step">
+        <h2>สร้างตาราง</h2>
+        <p id="run_ready_hint" class="run-ready-hint" style="display:none">✓ พร้อมสร้างตารางแล้ว</p>
+        <p style="margin:0 0 1rem 0; color:var(--muted); font-size:.9rem">ใช้ OR-Tools CP-SAT optimize ตารางเวรให้สมดุลที่สุด</p>
+        <button type="button" id="run_schedule" class="btn-primary btn-run" data-default-text="สร้างตารางเวร">
+          <span class="btn-text">สร้างตารางเวร</span>
+        </button>
+        <p id="run_message" class="message"></p>
+      </section>
+      <section class="card card-step">
+        <h2>นำเข้า / ส่งออกข้อมูล</h2>
+        <p class="text-muted" style="margin:0 0 .75rem 0">Export/Import ข้อมูลบุคลากร กะ ทักษะ ทั้งหมดเป็น JSON</p>
         <div class="form-inline">
-          <input type="text" id="shift_name" placeholder="ชื่อกะ" />
-          <button type="button" id="add_shift">เพิ่มกะ</button>
+          <button type="button" id="export_json" class="btn-primary">↓ Export JSON</button>
+          <label class="btn-secondary" style="cursor:pointer; display:inline-flex; align-items:center; gap:.25rem">
+            ↑ Import JSON
+            <input type="file" id="import_json_file" accept=".json" style="display:none" />
+          </label>
         </div>
-        <div class="positions-editor" style="margin-top:0.5rem">
-          <span>ช่องในกะ:</span>
-          <div id="shift_positions_list"></div>
-          <button type="button" id="add_position_row" class="small">เพิ่มช่อง</button>
+      </section>
+      <section class="card card-step">
+        <h2>จับคู่บุคลากร</h2>
+        <p class="text-muted" style="margin:0 0 .75rem 0">กำหนดว่าใครอยากอยู่ด้วยกัน หรือห้ามอยู่ด้วยกัน</p>
+        <div class="form-inline" style="margin-bottom:.75rem; flex-wrap:wrap; gap:.5rem">
+          <select id="pair_staff_1" style="min-width:8rem"><option value="">-- คนที่ 1 --</option></select>
+          <select id="pair_type" style="min-width:9rem">
+            <option value="together">อยู่ด้วยกัน</option>
+            <option value="apart">ห้ามอยู่ด้วยกัน</option>
+            <option value="depends_on">คนที่ 2 ต้องอยู่กับ คนที่ 1</option>
+          </select>
+          <select id="pair_staff_2" style="min-width:8rem"><option value="">-- คนที่ 2 --</option></select>
+          <button type="button" id="add_pair" class="btn-primary">+ เพิ่ม</button>
         </div>
-      </div>
-      <ul id="shift_list"></ul>
-    </section>
+        <ul id="pair_list" class="skill-list"></ul>
+      </section>
     </div>
 
-    <div id="page-run" class="app-page" style="display:none">
-    <section id="run" class="card">
-      <h2>สร้างตาราง</h2>
-      <button type="button" id="run_schedule" class="btn-primary">สร้างตารางเวร</button>
-      <p id="run_message" class="message"></p>
-    </section>
+    <!-- ===== SKILLS ===== -->
+    <div id="page-skills" class="app-page" style="display:none">
+      <header class="page-header">
+        <h1>ทักษะ &amp; ช่วงเวลา</h1>
+      </header>
+      <section id="skills" class="card">
+        <h2>ทักษะ</h2>
+        <p class="text-muted">เพิ่มทักษะที่นี่ แล้วกำหนดให้บุคลากรในหน้าบุคลากร</p>
+        <div class="form-inline" style="margin-bottom:1rem">
+          <input type="text" id="skill_name" placeholder="ชื่อทักษะ เช่น เจาะเลือด" aria-label="ชื่อทักษะ" style="min-width:12rem" />
+          <button type="button" id="add_skill" class="btn-primary">+ เพิ่ม</button>
+        </div>
+        <ul id="skill_list" class="skill-list"></ul>
+      </section>
+      <section id="titles" class="card">
+        <h2>ฉายา / ตำแหน่ง</h2>
+        <p class="text-muted">เช่น MT เต็มเวลา, พาร์ทไทม์ — กำหนดประเภทของแต่ละตำแหน่ง</p>
+        <div class="form-inline" style="margin-bottom:1rem">
+          <input type="text" id="title_name" placeholder="ชื่อฉายา เช่น MT เต็มเวลา" aria-label="ชื่อฉายา" style="min-width:10rem" />
+          <select id="title_type" aria-label="ประเภท">
+            <option value="fulltime">เต็มเวลา</option>
+            <option value="parttime">พาร์ทไทม์</option>
+          </select>
+          <button type="button" id="add_title" class="btn-primary">+ เพิ่ม</button>
+        </div>
+        <ul id="title_list" class="skill-list"></ul>
+      </section>
+      <section id="time_windows" class="card">
+        <h2>ช่วงเวลา</h2>
+        <p class="text-muted">กำหนดช่วงเวลาสำหรับกะและบุคลากร</p>
+        <div class="form-inline" style="margin-bottom:1rem">
+          <label for="time_window_start">เริ่ม</label>
+          <input type="text" id="time_window_start" placeholder="06:30" aria-label="เวลาเริ่ม" style="width:5.5rem" />
+          <label for="time_window_end">ถึง</label>
+          <input type="text" id="time_window_end" placeholder="12:00" aria-label="เวลาสิ้นสุด" style="width:5.5rem" />
+          <label for="time_window_name">ชื่อ (ไม่บังคับ)</label>
+          <input type="text" id="time_window_name" placeholder="ชื่อ หรือจะใช้เวลาเป็นชื่อ" aria-label="ชื่อช่วงเวลา" style="min-width:10rem" />
+          <button type="button" id="add_time_window" class="btn-primary">+ เพิ่ม</button>
+        </div>
+        <ul id="time_window_list" class="skill-list"></ul>
+      </section>
     </div>
 
+    <!-- ===== STAFF ===== -->
+    <div id="page-staff" class="app-page" style="display:none">
+      <header class="page-header">
+        <h1>บุคลากร</h1>
+      </header>
+      <section class="card">
+        <h2>เพิ่มบุคลากร</h2>
+        <fieldset class="form-section">
+          <legend>ข้อมูลพื้นฐาน</legend>
+          <div class="form-inline">
+            <input type="text" id="staff_name" placeholder="ชื่อ-นามสกุล" aria-label="ชื่อ" style="min-width:10rem" />
+            <label for="staff_title_select">ตำแหน่ง</label>
+            <select id="staff_title_select" aria-label="ฉายา/ตำแหน่ง" style="min-width:10rem">
+              <option value="">— เลือก —</option>
+            </select>
+          </div>
+        </fieldset>
+        <fieldset class="form-section">
+          <legend>วันหยุด</legend>
+          <div class="form-group staff-off-days-wrap" style="margin-top:0">
+            <label>ประจำสัปดาห์</label>
+            <div id="staff_add_off_days" class="staff-off-days-checkboxes" aria-label="เลือกวันหยุด">
+              <label class="staff-day-cb"><input type="checkbox" name="staff_add_off_day" value="0" /> จ</label>
+              <label class="staff-day-cb"><input type="checkbox" name="staff_add_off_day" value="1" /> อ</label>
+              <label class="staff-day-cb"><input type="checkbox" name="staff_add_off_day" value="2" /> พ</label>
+              <label class="staff-day-cb"><input type="checkbox" name="staff_add_off_day" value="3" /> พฤ</label>
+              <label class="staff-day-cb"><input type="checkbox" name="staff_add_off_day" value="4" /> ศ</label>
+              <label class="staff-day-cb"><input type="checkbox" name="staff_add_off_day" value="5" /> ส</label>
+              <label class="staff-day-cb"><input type="checkbox" name="staff_add_off_day" value="6" /> อา</label>
+            </div>
+          </div>
+          <div class="form-group staff-off-days-of-month-wrap" style="margin-top:.5rem">
+            <div class="month-mode-toggle">
+              <label class="month-mode-label">
+                <input type="radio" name="staff_add_month_mode" value="off" checked /> ระบุวันหยุด
+              </label>
+              <label class="month-mode-label">
+                <input type="radio" name="staff_add_month_mode" value="work" /> ระบุวันทำงาน
+              </label>
+            </div>
+            <label for="staff_add_off_days_of_month" id="staff_add_month_label">รายเดือน (วันที่)</label>
+            <input type="text" id="staff_add_off_days_of_month" placeholder="เช่น 1, 15, 31" aria-label="วันที่ของเดือน" style="max-width:16rem" />
+          </div>
+        </fieldset>
+        <fieldset class="form-section">
+          <legend>จำนวนกะ / เดือน</legend>
+          <div class="form-inline" style="margin-bottom:0">
+            <label for="staff_add_min_shifts">ขั้นต่ำ</label>
+            <input type="number" id="staff_add_min_shifts" min="0" max="31" placeholder="—" style="width:5rem" />
+            <label for="staff_add_max_shifts">สูงสุด</label>
+            <input type="number" id="staff_add_max_shifts" min="0" max="31" placeholder="—" style="width:5rem" />
+            <span class="text-muted" style="font-size:.82rem; margin:0">ว่างไว้ = ไม่จำกัด</span>
+          </div>
+        </fieldset>
+        <fieldset class="form-section">
+          <legend>ห่างกันอย่างน้อย (วัน)</legend>
+          <div class="form-inline" style="margin-bottom:0">
+            <input type="number" id="staff_add_min_gap" min="0" max="30" placeholder="—" style="width:5rem" />
+            <span class="text-muted" style="font-size:.82rem; margin:0">เช่น 6 = ห่างอย่างน้อย 6 วัน (≈1 ครั้ง/สัปดาห์)</span>
+          </div>
+        </fieldset>
+        <fieldset class="form-section">
+          <legend>ทักษะ &amp; เวลา</legend>
+          <div class="form-group staff-add-skills-wrap" style="margin-top:0">
+            <label>ทักษะ</label>
+            <div id="staff_add_skills" class="staff-skills-checkboxes"></div>
+          </div>
+          <div class="form-group staff-add-time-windows-wrap">
+            <label>ช่วงเวลาที่อยู่ได้</label>
+            <div id="staff_add_time_windows" class="staff-time-windows-checkboxes"></div>
+          </div>
+        </fieldset>
+        <button type="button" id="add_staff" class="btn-primary" style="margin-top:.75rem">+ เพิ่มบุคลากร</button>
+      </section>
+
+      <section class="card">
+        <h2>รายชื่อบุคลากร</h2>
+        <div class="staff-sidebar-layout">
+          <nav id="staff_sidebar" class="staff-sidebar" aria-label="รายชื่อบุคลากร">
+            <ul id="staff_list"></ul>
+          </nav>
+          <div id="staff_detail_panel" class="staff-detail-panel">
+            <div id="staff_detail_empty" class="staff-detail-empty">เลือกบุคลากรจากรายการด้านซ้าย</div>
+            <div id="staff_detail_loading" style="display:none">กำลังโหลด...</div>
+            <div id="staff_detail_content" style="display:none"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===== SHIFTS ===== -->
+    <div id="page-shifts" class="app-page" style="display:none">
+      <header class="page-header">
+        <h1>กะ</h1>
+      </header>
+      <section class="card">
+        <h2>เทมเพลต</h2>
+        <div class="template-buttons">
+          <span>โหลด</span>
+          <button type="button" id="template_1" class="btn-template btn-template-wip">Template 1 — เวรเจาะเลือด (ยังไม่เสร็จ)</button>
+          <button type="button" id="template_2" class="btn-template">Template 2 — Microbiology</button>
+          <button type="button" id="template_3" class="btn-template btn-template-wip">Template 3 — (ยังไม่เสร็จ)</button>
+          <button type="button" id="template_4" class="btn-template btn-template-demo">Template 4 — Demo infeasible</button>
+          <button type="button" id="clear_all" class="btn-clear-all small" title="ลบบุคลากร กะ และตารางทั้งหมด">ล้างทั้งหมด</button>
+        </div>
+      </section>
+      <section class="card">
+        <h2>เพิ่ม / แก้ไขกะ</h2>
+        <div class="shift-form">
+          <div class="form-inline">
+            <input type="text" id="shift_name" placeholder="ชื่อกะ" aria-label="ชื่อกะ" />
+            <button type="button" id="add_shift" class="btn-primary">+ บันทึกกะ</button>
+            <span id="shift_edit_actions" style="display:none">
+              <button type="button" id="shift_edit_cancel" class="btn-secondary small">ยกเลิก</button>
+            </span>
+          </div>
+          <div class="form-inline" style="margin-top:.5rem">
+            <label for="shift_active_days">Active days (0=จ..6=อา)</label>
+            <input type="text" id="shift_active_days" placeholder="เช่น 0,1,2,3,4 หรือว่าง=ทุกวัน" style="width:14rem" />
+            <label class="staff-day-cb" style="margin-left:.5rem">
+              <input type="checkbox" id="shift_include_holidays" /> รวมวันหยุดราชการ
+            </label>
+          </div>
+          <div class="positions-editor">
+            <span>ช่องในกะ</span>
+            <div id="shift_positions_list"></div>
+            <button type="button" id="add_position_row" class="small">+ เพิ่มช่อง</button>
+          </div>
+        </div>
+      </section>
+      <section class="card">
+        <h2>รายการกะ</h2>
+        <ul id="shift_list"></ul>
+      </section>
+    </div>
+
+    <!-- ===== SCHEDULE ===== -->
     <div id="page-schedule" class="app-page" style="display:none">
-    <section id="schedule_result" class="card">
-      <h2>ตารางล่าสุด</h2>
-      <p id="schedule_meta"></p>
-      <div id="schedule_table_wrap"></div>
-      <p>
-        <a id="export_csv" href="#" class="btn-secondary" style="display:none">ดาวน์โหลด CSV</a>
-      </p>
-    </section>
+      <header class="page-header">
+        <h1>ตารางล่าสุด</h1>
+      </header>
+      <section id="schedule_result" class="card">
+        <p id="schedule_meta"></p>
+        <div id="schedule_table_wrap"></div>
+        <p>
+          <a id="export_csv" href="#" class="btn-secondary" style="display:none">↓ ดาวน์โหลด CSV</a>
+        </p>
+      </section>
     </div>
-  </main>
 
+  </main>
   <script src="/static/app.js"></script>
 </body>
 </html>
