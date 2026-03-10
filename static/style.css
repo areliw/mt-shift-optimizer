@@ -88,6 +88,14 @@ body.app-layout {
   flex: 1;
 }
 
+.app-sidebar-footer {
+  padding: 1rem 1.25rem;
+  font-size: .75rem;
+  color: rgba(148,163,184,.5);
+  border-top: 1px solid rgba(255,255,255,.06);
+  margin-top: auto;
+}
+
 .app-nav-item {
   display: flex;
   align-items: center;
