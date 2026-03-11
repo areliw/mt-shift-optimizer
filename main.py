@@ -74,6 +74,7 @@ from database import (
     remove_staff_pair,
     export_all_data,
     import_all_data,
+    swap_slots,
 )
 from scheduler import generate_schedule, diagnose_infeasible, DUMMY_WORKER
 from ortools.sat.python import cp_model
@@ -373,6 +374,18 @@ class SlotAssign(BaseModel):
     position: str
     slot_index: int = 0
     staff_name: str
+
+
+class SlotSwap(BaseModel):
+    """Swap staff between two slots"""
+    day_a: int
+    shift_name_a: str
+    position_a: str
+    slot_index_a: int = 0
+    day_b: int
+    shift_name_b: str
+    position_b: str
+    slot_index_b: int = 0
 
 
 class WorkspaceCreate(BaseModel):
@@ -812,6 +825,25 @@ def api_assign_slot(run_id: int, body: SlotAssign):
         raise HTTPException(status_code=400, detail="staff_name ต้องไม่ว่าง")
     try:
         update_slot_staff(run_id, body.day, body.shift_name, body.position, body.slot_index, name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    updated = get_schedule(run_id)
+    return {"ok": True, "run_id": run_id, "schedule": updated}
+
+
+# --- Manual Slot Swap ---
+@ws_router.post("/api/schedule/{run_id:int}/swap")
+def api_swap_slots(run_id: int, body: SlotSwap):
+    """สลับ staff ระหว่างสอง slot (atomic, ไม่ block โดย same-day guard)"""
+    data = get_schedule(run_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Schedule not found.")
+    try:
+        swap_slots(
+            run_id,
+            body.day_a, body.shift_name_a, body.position_a, body.slot_index_a,
+            body.day_b, body.shift_name_b, body.position_b, body.slot_index_b,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     updated = get_schedule(run_id)

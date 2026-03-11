@@ -87,6 +87,16 @@ const DAY_NAMES = ["จันทร์", "อังคาร", "พุธ", "พ
 let shiftsCache = [];
 let currentShiftId = null;
 
+// Swap state
+let _swapPending = null;
+function _clearSwapPending() {
+  if (_swapPending) {
+    _swapPending.span.classList.remove("cell-name-swap-pending");
+    _swapPending = null;
+  }
+}
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") _clearSwapPending(); });
+
 function parseOffDaysOfMonth(str) {
   if (!str || typeof str !== "string") return [];
   return str
@@ -1031,55 +1041,37 @@ async function handleNameClick(span, staffList, runId, busyByDay) {
     return;
   }
 
-  // --- Swap mode ---
+  // --- Swap mode: คลิกที่สอง ---
   if (_swapPending) {
     const src = _swapPending;
-    // คลิกที่สองบน slot เดิม → ยกเลิก
     if (src.span === span) { _clearSwapPending(); return; }
-    // ยืนยัน swap
     _clearSwapPending();
     span.dataset.loading = "1";
-    src.span.dataset.loading = "1";
     try {
-      const [r1, r2] = await Promise.all([
-        fetch(`${API}/schedule/${runId}/slot`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ day: src.day, shift_name: src.shiftName, position: src.position, slot_index: src.slotIndex, staff_name: currentName }),
+      const r = await fetch(`${API}/schedule/${runId}/swap`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          day_a: src.day, shift_name_a: src.shiftName, position_a: src.position, slot_index_a: src.slotIndex,
+          day_b: day, shift_name_b: shiftName, position_b: position, slot_index_b: slotIndex,
         }),
-        fetch(`${API}/schedule/${runId}/slot`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ day, shift_name: shiftName, position, slot_index: slotIndex, staff_name: src.staffName }),
-        }),
-      ]);
-      if (!r1.ok || !r2.ok) throw new Error("swap failed");
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "swap failed");
       await refreshSchedule();
     } catch (e) {
       delete span.dataset.loading;
-      delete src.span.dataset.loading;
       alert("สลับไม่สำเร็จ: " + e.message);
     }
     return;
   }
 
-  // คลิกแรก → เข้า swap mode (ไม่เปิด dropdown ทันที)
-  _swapPending = { span, runId, day, shiftName, position, slotIndex, staffName: currentName };
-  span.classList.add("cell-name-swap-pending");
-  // ถ้าคลิกที่อื่น (ไม่ใช่ .cell-name) → ยกเลิก swap mode แล้วเปิด dropdown ปกติ
-  const onOutsideClick = (e) => {
-    if (e.target === span) return;
-    document.removeEventListener("click", onOutsideClick, true);
-    if (!_swapPending || _swapPending.span !== span) return;
-    if (e.target.classList && e.target.classList.contains("cell-name")) return; // handled by swap logic
-    _clearSwapPending();
-    // เปิด dropdown ปกติ
-    _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, position, slotIndex, currentName);
-  };
-  setTimeout(() => document.addEventListener("click", onOutsideClick, true), 0);
+  _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, position, slotIndex, currentName);
 }
 
 function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, position, slotIndex, currentName) {
+  const wrap = document.createElement("span");
+  wrap.className = "name-edit-wrap";
+
   const select = document.createElement("select");
   select.className = "dummy-assign-select";
   const ph = document.createElement("option");
@@ -1101,7 +1093,6 @@ function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, po
     return lvl >= minSkillLevel;
   };
 
-  // เอาคนปัจจุบันออกจาก busy (กำลังถูกแทนที่)
   const busy = new Set(busyByDay && busyByDay[day] ? [...busyByDay[day]] : []);
   busy.delete(currentName);
 
@@ -1119,23 +1110,45 @@ function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, po
     select.appendChild(opt);
   });
 
+  const swapBtn = document.createElement("button");
+  swapBtn.type = "button";
+  swapBtn.className = "btn-swap-pick";
+  swapBtn.title = "สลับกับช่องอื่น";
+  swapBtn.textContent = "⇄";
+
   const restoreSpan = () => {
     const ns = document.createElement("span");
     ns.className = "cell-name";
     ns.title = "คลิกเพื่อเปลี่ยน";
     ns.textContent = currentName;
     Object.assign(ns.dataset, { run: runId, day, shift: shiftName, pos: position, slot: slotIndex, name: currentName });
-    select.replaceWith(ns);
+    wrap.replaceWith(ns);
     ns.addEventListener("click", () => handleNameClick(ns, staffList, runId, busyByDay));
   };
 
-  span.replaceWith(select);
+  wrap.appendChild(select);
+  wrap.appendChild(swapBtn);
+  span.replaceWith(wrap);
   select.focus();
+
+  swapBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    // สร้าง span จำลองเพื่อใช้ใน swap
+    const ns = document.createElement("span");
+    ns.className = "cell-name cell-name-swap-pending";
+    ns.title = "รอสลับ — คลิกชื่ออื่น หรือ Esc เพื่อยกเลิก";
+    ns.textContent = currentName;
+    Object.assign(ns.dataset, { run: runId, day, shift: shiftName, pos: position, slot: slotIndex, name: currentName });
+    ns.addEventListener("click", () => handleNameClick(ns, staffList, runId, busyByDay));
+    wrap.replaceWith(ns);
+    _swapPending = { span: ns, runId, day, shiftName, position, slotIndex, staffName: currentName };
+  });
 
   select.addEventListener("change", async () => {
     const staffName = select.value;
     if (!staffName) return;
     select.disabled = true;
+    swapBtn.disabled = true;
     try {
       const r = await fetch(`${API}/schedule/${runId}/slot`, {
         method: "PATCH",
@@ -1149,7 +1162,10 @@ function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, po
       alert("เปลี่ยนไม่สำเร็จ: " + e.message);
     }
   });
-  select.addEventListener("blur", () => { if (select.value === currentName || !select.value) restoreSpan(); });
+  select.addEventListener("blur", (e) => {
+    // delay เพื่อให้ swapBtn click ทำงานก่อน
+    setTimeout(() => { if (!wrap.contains(document.activeElement)) restoreSpan(); }, 150);
+  });
 }
 
 async function refreshStaff() {

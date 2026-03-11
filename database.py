@@ -1851,6 +1851,36 @@ def update_slot_staff(run_id, day, shift_name, position, slot_index, new_staff_n
             conn.close()
 
 
+def swap_slots(run_id, day_a, shift_a, pos_a, slot_a, day_b, shift_b, pos_b, slot_b, conn=None):
+    """สลับ staff ระหว่างสอง slot อย่างปลอดภัย (single transaction, ไม่ trigger false-positive duplicate guard)"""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        row_a = conn.execute(
+            "SELECT staff_name FROM schedule_slot WHERE run_id=? AND day=? AND shift_name=? AND position=? AND slot_index=?",
+            (run_id, day_a, shift_a, pos_a, slot_a),
+        ).fetchone()
+        row_b = conn.execute(
+            "SELECT staff_name FROM schedule_slot WHERE run_id=? AND day=? AND shift_name=? AND position=? AND slot_index=?",
+            (run_id, day_b, shift_b, pos_b, slot_b),
+        ).fetchone()
+        if not row_a or not row_b:
+            raise ValueError("ไม่พบ slot ที่ระบุ")
+        name_a, name_b = row_a[0], row_b[0]
+        conn.execute(
+            "UPDATE schedule_slot SET staff_name=? WHERE run_id=? AND day=? AND shift_name=? AND position=? AND slot_index=?",
+            (name_b, run_id, day_a, shift_a, pos_a, slot_a),
+        )
+        conn.execute(
+            "UPDATE schedule_slot SET staff_name=? WHERE run_id=? AND day=? AND shift_name=? AND position=? AND slot_index=?",
+            (name_a, run_id, day_b, shift_b, pos_b, slot_b),
+        )
+        conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
 def _default_shift_name_for_template(template_id: int) -> str:
     if template_id == 1:
         return "เวรเจาะเลือด"
