@@ -489,17 +489,15 @@ function renderStaffList(items) {
 function renderShiftList(items) {
   const ul = document.getElementById("shift_list");
   function parseRoomAndKind(shiftName) {
-    const s = String(shiftName || "");
-    const parts = s.trim().split(/\s+/);
-    const room = parts.length >= 2 ? parts[parts.length - 1] : "";
-    let kind = "";
-    if (s.includes("เวรเช้า")) kind = "morning";
-    else if (s.includes("เวรบ่าย")) kind = "afternoon";
-    else if (s.includes("เวรดึก")) kind = "night";
-    else kind = "other";
+    const s = String(shiftName || "").trim();
+    let kind = "other";
+    if (/เช้า/.test(s)) kind = "morning";
+    else if (/บ่าย/.test(s)) kind = "afternoon";
+    else if (/ดึก/.test(s)) kind = "night";
+    const room = s.replace(/^ห้อง\s+/, "").replace(/\s*(เช้า|บ่าย|ดึก|เวรเช้า|เวรบ่าย|เวรดึก)$/, "").trim() || s;
     return { room, kind };
   }
-  const kindOrder = { morning: 1, afternoon: 2, night: 3, other: 99 };
+  const kindOrder = { night: 1, morning: 2, afternoon: 3, other: 99 };
   const roomOrder = { Micro: 1, Hemato: 2, Immune: 3, Chem: 4 };
 
   const arr = Array.isArray(items) ? items.slice() : [];
@@ -738,17 +736,15 @@ function renderSchedule(data, staffList) {
 
   // --- Group/sort shifts by "room" suffix for readability (Template 5) ---
   function parseRoomAndKind(shiftName) {
-    const s = String(shiftName || "");
-    const parts = s.trim().split(/\s+/);
-    const room = parts.length >= 2 ? parts[parts.length - 1] : "";
-    let kind = "";
-    if (s.includes("เวรเช้า")) kind = "morning";
-    else if (s.includes("เวรบ่าย")) kind = "afternoon";
-    else if (s.includes("เวรดึก")) kind = "night";
-    else kind = "other";
+    const s = String(shiftName || "").trim();
+    let kind = "other";
+    if (/เช้า/.test(s)) kind = "morning";
+    else if (/บ่าย/.test(s)) kind = "afternoon";
+    else if (/ดึก/.test(s)) kind = "night";
+    const room = s.replace(/^ห้อง\s+/, "").replace(/\s*(เช้า|บ่าย|ดึก|เวรเช้า|เวรบ่าย|เวรดึก)$/, "").trim() || s;
     return { room, kind };
   }
-  const kindOrder = { morning: 1, afternoon: 2, night: 3, other: 99 };
+  const kindOrder = { night: 1, morning: 2, afternoon: 3, other: 99 };
   const roomOrder = { Micro: 1, Hemato: 2, Immune: 3, Chem: 4 };
   const shiftsMeta = Object.keys(shiftPositions)
     .map((sn) => ({ name: sn, ...parseRoomAndKind(sn) }))
@@ -843,9 +839,11 @@ function renderSchedule(data, staffList) {
             const si = s.slot_index != null ? s.slot_index : 0;
             return `<span class="cell-dummy" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" title="คลิกเพื่อมอบหมาย">ว่าง</span>`;
           }
+          const si = s.slot_index != null ? s.slot_index : 0;
+          const nameSpan = `<span class="cell-name" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" data-name="${escapeHtml(s.staff_name)}" title="คลิกเพื่อเปลี่ยน">${escapeHtml(s.staff_name)}</span>`;
           return s.time_window
-            ? `${escapeHtml(s.staff_name)} <small class="tw-label">(${escapeHtml(s.time_window)})</small>`
-            : escapeHtml(s.staff_name);
+            ? `${nameSpan} <small class="tw-label">(${escapeHtml(s.time_window)})</small>`
+            : nameSpan;
         });
         const sepClass = (room && prevRoom !== null && room !== prevRoom) ? " td-room-sep" : "";
         const cls = (hasDummy ? "td-has-dummy" : "") + sepClass;
@@ -870,6 +868,9 @@ function renderSchedule(data, staffList) {
   });
   wrap.querySelectorAll(".cell-dummy").forEach((span) => {
     span.addEventListener("click", () => handleDummyClick(span, sf, runId, busyByDay));
+  });
+  wrap.querySelectorAll(".cell-name").forEach((span) => {
+    span.addEventListener("click", () => handleNameClick(span, sf, runId, busyByDay));
   });
 
   // Summary stats
@@ -996,6 +997,91 @@ async function handleDummyClick(span, staffList, runId, busyByDay) {
     }
   });
   select.addEventListener("blur", () => { if (!select.value) restoreSpan(); });
+}
+
+async function handleNameClick(span, staffList, runId, busyByDay) {
+  if (span.dataset.loading) return;
+  const day = parseInt(span.dataset.day, 10);
+  const shiftName = span.dataset.shift;
+  const position = span.dataset.pos;
+  const slotIndex = parseInt(span.dataset.slot, 10);
+  const currentName = span.dataset.name;
+
+  if (!staffList || staffList.length === 0) {
+    alert("ไม่มีบุคลากรในระบบ");
+    return;
+  }
+
+  const select = document.createElement("select");
+  select.className = "dummy-assign-select";
+  const ph = document.createElement("option");
+  ph.value = "";
+  ph.textContent = "— เปลี่ยนเป็น... —";
+  select.appendChild(ph);
+
+  const shift = (shiftsCache || []).find((s) => s.name === shiftName);
+  const posInfo = shift && shift.positions ? shift.positions.find((p) => p.name === position) : null;
+  const requiredSkill = posInfo && posInfo.required_skill ? (posInfo.required_skill || "").trim() : "";
+  const minSkillLevel = posInfo && posInfo.min_skill_level ? parseInt(posInfo.min_skill_level, 10) || 0 : 0;
+
+  const canWorkPosition = (mt) => {
+    if (!requiredSkill) return true;
+    const skills = mt.skills || [];
+    const levels = mt.skill_levels || {};
+    if (!skills.includes(requiredSkill)) return false;
+    const lvl = parseInt(levels[requiredSkill], 10) || 1;
+    return lvl >= minSkillLevel;
+  };
+
+  // เอาคนปัจจุบันออกจาก busy (กำลังถูกแทนที่)
+  const busy = new Set(busyByDay && busyByDay[day] ? [...busyByDay[day]] : []);
+  busy.delete(currentName);
+
+  staffList.forEach((mt) => {
+    const opt = document.createElement("option");
+    opt.value = mt.name;
+    const isBusy = busy.has(mt.name);
+    const hasSkill = canWorkPosition(mt);
+    let label = mt.name;
+    if (isBusy && mt.name !== currentName) label += " (มีเวรแล้ว)";
+    else if (!hasSkill && requiredSkill) label += " (ไม่มีทักษะ)";
+    opt.textContent = label;
+    if (mt.name === currentName) opt.selected = true;
+    if (isBusy || (!hasSkill && requiredSkill)) opt.disabled = true;
+    select.appendChild(opt);
+  });
+
+  const restoreSpan = () => {
+    const ns = document.createElement("span");
+    ns.className = "cell-name";
+    ns.title = "คลิกเพื่อเปลี่ยน";
+    ns.textContent = currentName;
+    Object.assign(ns.dataset, { run: runId, day, shift: shiftName, pos: position, slot: slotIndex, name: currentName });
+    select.replaceWith(ns);
+    ns.addEventListener("click", () => handleNameClick(ns, staffList, runId, busyByDay));
+  };
+
+  span.replaceWith(select);
+  select.focus();
+
+  select.addEventListener("change", async () => {
+    const staffName = select.value;
+    if (!staffName) return;
+    select.disabled = true;
+    try {
+      const r = await fetch(`${API}/schedule/${runId}/slot`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ day, shift_name: shiftName, position, slot_index: slotIndex, staff_name: staffName }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "assign failed");
+      await refreshSchedule();
+    } catch (e) {
+      restoreSpan();
+      alert("เปลี่ยนไม่สำเร็จ: " + e.message);
+    }
+  });
+  select.addEventListener("blur", () => { if (select.value === currentName || !select.value) restoreSpan(); });
 }
 
 async function refreshStaff() {

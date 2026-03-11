@@ -582,6 +582,18 @@ textarea:focus {
 
 .cell-dummy:hover { background: #fca5a5; }
 
+/* ===== Editable filled slots ===== */
+.cell-name {
+  cursor: pointer;
+  border-bottom: 1.5px dashed #94a3b8;
+  padding-bottom: 1px;
+  transition: color .12s, border-color .12s;
+}
+.cell-name:hover {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
 .cell-dummy-preview {
   display: inline-flex;
   background: var(--danger-light);
