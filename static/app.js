@@ -725,14 +725,20 @@ function renderSchedule(data, staffList) {
     if (!byDayShiftPos[key]) byDayShiftPos[key] = [];
     byDayShiftPos[key].push(s);
   });
+  // Build shiftPositions from the shift definitions (preserves sort_order from DB)
   const shiftPositions = {};
+  (shiftsCache || []).forEach((sh) => {
+    if (sh.positions && sh.positions.length) {
+      shiftPositions[sh.name] = sh.positions.map((p) => (typeof p === "string" ? p : p.name));
+    }
+  });
+  // Augment with any position names found in slots that aren't already in the definition
   data.slots.forEach((s) => {
     const sn = s.shift_name;
     const pos = s[posKey] || s.room || s.position || "";
     if (!shiftPositions[sn]) shiftPositions[sn] = [];
     if (!shiftPositions[sn].includes(pos)) shiftPositions[sn].push(pos);
   });
-  // positions already in definition order from API (sort_order)
 
   // --- Group/sort shifts by "room" suffix for readability (Template 5) ---
   function parseRoomAndKind(shiftName) {
