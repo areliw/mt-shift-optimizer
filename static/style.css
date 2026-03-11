@@ -1147,9 +1147,32 @@ li .name { flex: 1; }
 }
 
 #schedule_table_wrap thead tr:nth-child(2) th {
+  background: var(--sidebar-bg);
+  color: #e2e8f0;
+  font-size: .78rem;
+  text-align: center;
+}
+
+/* When we have 3 header rows (room/shift/position), style position row smaller */
+#schedule_table_wrap thead tr:nth-child(3) th {
   font-size: .72rem;
   text-align: center;
   padding: .25rem .35rem;
+}
+
+.th-room {
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+
+.td-room-sep,
+#schedule_table_wrap thead th[data-room]:not([data-room=""]).td-room-sep {
+  border-left: 3px solid rgba(148, 163, 184, .8) !important;
+}
+
+#schedule_table_wrap thead th[data-room]:not([data-room=""]) {
+  /* subtle divider between rooms */
+  border-left: 3px solid rgba(148, 163, 184, .8);
 }
 
 #schedule_table_wrap td:first-child {
@@ -1182,6 +1205,20 @@ li .name { flex: 1; }
   color: var(--muted);
   font-size: .88rem;
   margin: 0 0 .5rem;
+}
+
+/* ===== Shift list grouping (Template 5) ===== */
+#shift_list .shift-room-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: .4rem .55rem;
+  font-weight: 700;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
 }
 
 /* ===== Schedule summary ===== */

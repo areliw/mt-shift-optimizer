@@ -210,6 +210,10 @@
             <input type="number" id="staff_add_min_gap" min="0" max="30" placeholder="—" style="width:5rem" />
             <span class="text-muted" style="font-size:.82rem; margin:0">เช่น 6 = ห่างอย่างน้อย 6 วัน (≈1 ครั้ง/สัปดาห์)</span>
           </div>
+          <div class="form-group" style="margin-top:.5rem">
+            <label class="text-muted" style="font-size:.82rem">กำหนดเว้นขั้นต่ำแยกตามกะ (ใส่ตัวเลขเฉพาะกะที่อยากจำกัด)</label>
+            <div id="staff_add_min_gap_rules" class="staff-skills-checkboxes"></div>
+          </div>
         </fieldset>
         <fieldset class="form-section">
           <legend>ทักษะ &amp; เวลา</legend>
@@ -251,6 +255,7 @@
           <span>โหลด</span>
           <button type="button" id="template_1" class="btn-template btn-template-wip">Template 1 — เวรเจาะเลือด (ยังไม่เสร็จ)</button>
           <button type="button" id="template_2" class="btn-template">Template 2 — Microbiology</button>
+          <button type="button" id="template_5" class="btn-template">Template 5 — Multi-room (Micro/Hemato/Immune/Chem)</button>
           <button type="button" id="template_3" class="btn-template btn-template-wip">Template 3 — (ยังไม่เสร็จ)</button>
           <button type="button" id="template_4" class="btn-template btn-template-demo">Template 4 — Demo infeasible</button>
           <button type="button" id="clear_all" class="btn-clear-all small" title="ลบบุคลากร กะ และตารางทั้งหมด">ล้างทั้งหมด</button>

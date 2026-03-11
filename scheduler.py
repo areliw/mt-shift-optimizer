@@ -341,14 +341,60 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
         if mx and int(mx) > 0:
             model.add(total <= int(mx))
 
-    # --- min_gap_days: sliding window — ใน N+1 วันต่อเนื่องทำได้ไม่เกิน 1 วัน ---
-    for mt in mt_list:
-        gap = mt.get("min_gap_days")
-        if gap and int(gap) > 0:
-            g = int(gap)
+    # --- min_gap: sliding window — ใน N+1 วันต่อเนื่องทำได้ไม่เกิน 1 วัน (รองรับแยกตามกะ) ---
+    def _apply_gap_rule(mt_name: str, g: int, shift_names: list[str] | None):
+        if g <= 0:
+            return
+        if shift_names:
+            shift_set = {s for s in (str(x).strip() for x in shift_names) if s}
+            if not shift_set:
+                shift_names = None
+        if shift_names:
+            # จำกัดเฉพาะกะใน shift_set
             for start_day in range(num_days - g):
-                window = [has_work[(mt["name"], start_day + d)] for d in range(g + 1)]
+                window_terms = []
+                for d in range(g + 1):
+                    day_idx = start_day + d
+                    scoped_day_vars = [
+                        assign[(mt_name, day_idx, shift["name"], pos_name, slot_i)]
+                        for shift, pos, pos_name, slot_i in expanded
+                        if shift["name"] in shift_set
+                    ]
+                    window_terms.append(sum(scoped_day_vars) if scoped_day_vars else 0)
+                model.add(sum(window_terms) <= 1)
+        else:
+            # นับทุกกะ (เดิม)
+            for start_day in range(num_days - g):
+                window = [has_work[(mt_name, start_day + d)] for d in range(g + 1)]
                 model.add(sum(window) <= 1)
+
+    for mt in mt_list:
+        mt_name = mt["name"]
+
+        # 1) กฎใหม่: min_gap_rules = [{shift, gap_days}, ...]
+        rules = mt.get("min_gap_rules") or []
+        if isinstance(rules, list):
+            for r in rules:
+                if not isinstance(r, dict):
+                    continue
+                sh = str(r.get("shift") or "").strip()
+                try:
+                    g = int(r.get("gap_days") or 0)
+                except Exception:
+                    g = 0
+                if sh and g > 0:
+                    _apply_gap_rule(mt_name, g, [sh])
+
+        # 2) backward compatible: min_gap_days + min_gap_shifts
+        gap = mt.get("min_gap_days")
+        try:
+            g0 = int(gap) if gap is not None else 0
+        except Exception:
+            g0 = 0
+        if g0 > 0:
+            gap_shifts = mt.get("min_gap_shifts") or []
+            gap_shifts = [str(s).strip() for s in gap_shifts if str(s).strip()]
+            _apply_gap_rule(mt_name, g0, gap_shifts if gap_shifts else None)
 
     # --- Pair preferences ---
     # "apart": hard constraint — never same shift on same day

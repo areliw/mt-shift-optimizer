@@ -80,6 +80,8 @@ class StaffCreate(BaseModel):
     min_shifts_per_month: int | None = None
     max_shifts_per_month: int | None = None
     min_gap_days: int | None = None
+    min_gap_shifts: list[str] = []
+    min_gap_rules: list[dict] = []
 
 
 class StaffUpdate(BaseModel):
@@ -93,6 +95,8 @@ class StaffUpdate(BaseModel):
     min_shifts_per_month: int | None = None
     max_shifts_per_month: int | None = None
     min_gap_days: int | None = None
+    min_gap_shifts: list[str] = []
+    min_gap_rules: list[dict] = []
 
 
 class PositionItem(BaseModel):
@@ -217,7 +221,19 @@ def api_remove_time_window(name: str):
 @app.post("/api/staff")
 def api_create_staff(body: StaffCreate):
     try:
-        sid = create_staff(body.name, body.off_days, body.skills, body.title, body.off_days_of_month, body.time_windows, min_shifts_per_month=body.min_shifts_per_month, max_shifts_per_month=body.max_shifts_per_month, min_gap_days=body.min_gap_days)
+        sid = create_staff(
+            body.name,
+            body.off_days,
+            body.skills,
+            body.title,
+            body.off_days_of_month,
+            body.time_windows,
+            min_shifts_per_month=body.min_shifts_per_month,
+            max_shifts_per_month=body.max_shifts_per_month,
+            min_gap_days=body.min_gap_days,
+            min_gap_shifts=body.min_gap_shifts,
+            min_gap_rules=body.min_gap_rules,
+        )
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail=f"ชื่อ '{body.name}' มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
     from database import get_title_type
@@ -228,7 +244,21 @@ def api_create_staff(body: StaffCreate):
 @app.put("/api/staff/{staff_id:int}")
 def api_update_staff(staff_id: int, body: StaffUpdate):
     try:
-        update_staff(staff_id, body.name, body.off_days, body.skills, body.title, body.off_days_of_month, body.time_windows, skill_levels=body.skill_levels, min_shifts_per_month=body.min_shifts_per_month, max_shifts_per_month=body.max_shifts_per_month, min_gap_days=body.min_gap_days)
+        update_staff(
+            staff_id,
+            body.name,
+            body.off_days,
+            body.skills,
+            body.title,
+            body.off_days_of_month,
+            body.time_windows,
+            skill_levels=body.skill_levels,
+            min_shifts_per_month=body.min_shifts_per_month,
+            max_shifts_per_month=body.max_shifts_per_month,
+            min_gap_days=body.min_gap_days,
+            min_gap_shifts=body.min_gap_shifts,
+            min_gap_rules=body.min_gap_rules,
+        )
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail=f"ชื่อ '{body.name}' มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
     from database import get_title_type
@@ -237,7 +267,7 @@ def api_update_staff(staff_id: int, body: StaffUpdate):
 
 
 @app.delete("/api/staff/{staff_id:int}")
-def api_delete_staff(staff_id: int):
+def api_delete_staff(staff_id: int): 
     delete_staff(staff_id)
     return {"ok": True}
 
@@ -257,7 +287,7 @@ def api_add_skill(body: SkillCreate):
     return {"name": name}
 
 
-@app.put("/api/skills/{old_name:path}")
+@app.put("/api/skills/{old_name}")
 def api_rename_skill(old_name: str, body: SkillCreate):
     old = (old_name or "").strip()
     new = (body.name or "").strip()
@@ -272,7 +302,7 @@ def api_rename_skill(old_name: str, body: SkillCreate):
     return {"name": new}
 
 
-@app.delete("/api/skills/{name:path}")
+@app.delete("/api/skills/{name}")
 def api_remove_skill(name: str):
     remove_skill_catalog(name)
     return {"ok": True}
@@ -282,12 +312,12 @@ class SkillLevelsUpdate(BaseModel):
     levels: list[str]
 
 
-@app.get("/api/skills/{name:path}/levels")
+@app.get("/api/skills/{name}/levels")
 def api_get_skill_levels(name: str):
     return get_skill_levels(name)
 
 
-@app.put("/api/skills/{name:path}/levels")
+@app.put("/api/skills/{name}/levels")
 def api_set_skill_levels(name: str, body: SkillLevelsUpdate):
     labels = [l.strip() for l in body.levels if l.strip()]
     if not labels:
@@ -342,7 +372,7 @@ def api_create_shift(body: ShiftCreate):
 
 
 @app.post("/api/shifts/from-template")
-def api_create_shift_from_template(template: int = Query(..., ge=1, le=4), name: str | None = Query(None)):
+def api_create_shift_from_template(template: int = Query(..., ge=1, le=5), name: str | None = Query(None)):
     sid = create_shift_from_template(template, name_override=name)
     shifts = list_shifts()
     created = next((s for s in shifts if s["id"] == sid), None)
@@ -350,7 +380,7 @@ def api_create_shift_from_template(template: int = Query(..., ge=1, le=4), name:
 
 
 @app.post("/api/apply-template")
-def api_apply_template(template: int = Query(..., ge=1, le=4)):
+def api_apply_template(template: int = Query(..., ge=1, le=5)):
     """Apply template: creates shift(s) and staff (for templates that seed staff)."""
     apply_template(template)
     staff = list_staff()
@@ -546,7 +576,10 @@ def api_assign_slot(run_id: int, body: SlotAssign):
     name = body.staff_name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="staff_name ต้องไม่ว่าง")
-    update_slot_staff(run_id, body.day, body.shift_name, body.position, body.slot_index, name)
+    try:
+        update_slot_staff(run_id, body.day, body.shift_name, body.position, body.slot_index, name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     updated = get_schedule(run_id)
     return {"ok": True, "run_id": run_id, "schedule": updated}
 

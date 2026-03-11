@@ -104,6 +104,10 @@ function renderStaffDetailContent(staff) {
       }).join(", ")
     : "—";
   const timeWindowsLabel = (staff.time_windows && staff.time_windows.length) ? staff.time_windows.join(", ") : "—";
+  const gapShiftsLabel = (staff.min_gap_shifts && staff.min_gap_shifts.length) ? staff.min_gap_shifts.join(", ") : "";
+  const gapRulesLabel = (staff.min_gap_rules && staff.min_gap_rules.length)
+    ? staff.min_gap_rules.map((r) => `${r.shift}: ${r.gap_days} วัน`).join(", ")
+    : "";
   return (
     "<dl class=\"staff-detail-dl\">" +
     "<dt>ชื่อ</dt><dd>" + escapeHtml(staff.name) + "</dd>" +
@@ -117,11 +121,52 @@ function renderStaffDetailContent(staff) {
     "<hr class=\"detail-divider\" />" +
     "<dl class=\"staff-detail-dl\">" +
     "<dt>กะ/เดือน (min–max)</dt><dd>" + (staff.min_shifts_per_month != null || staff.max_shifts_per_month != null ? (staff.min_shifts_per_month != null ? staff.min_shifts_per_month : "—") + " – " + (staff.max_shifts_per_month != null ? staff.max_shifts_per_month : "—") : "ไม่จำกัด") + "</dd>" +
-    "<dt>ห่างอย่างน้อย</dt><dd>" + (staff.min_gap_days != null ? staff.min_gap_days + " วัน" : "—") + "</dd>" +
+    "<dt>ห่างอย่างน้อย</dt><dd>" +
+      (staff.min_gap_days != null
+        ? staff.min_gap_days + " วัน" +
+          (gapShiftsLabel ? " <span class=\"text-muted\" style=\"font-size:.82rem\">(เฉพาะ: " + escapeHtml(gapShiftsLabel) + ")</span>" : "") +
+          (gapRulesLabel ? " <div class=\"text-muted\" style=\"font-size:.82rem;margin-top:.25rem\">แยกตามกะ: " + escapeHtml(gapRulesLabel) + "</div>" : "")
+        : (gapRulesLabel ? "<span class=\"text-muted\">—</span><div class=\"text-muted\" style=\"font-size:.82rem;margin-top:.25rem\">แยกตามกะ: " + escapeHtml(gapRulesLabel) + "</div>" : "—")) +
+    "</dd>" +
     "<dt>ทักษะ</dt><dd>" + skillsLabel + "</dd>" +
     "<dt>ช่วงที่อยู่ได้</dt><dd>" + escapeHtml(timeWindowsLabel) + "</dd>" +
     "</dl>"
   );
+}
+
+function renderMinGapShiftCheckboxes(containerEl, selected) {
+  if (!containerEl) return;
+  const set = selected instanceof Set ? selected : new Set(Array.isArray(selected) ? selected : []);
+  const list = Array.isArray(shiftsCache) ? shiftsCache : [];
+  containerEl.innerHTML = list.length
+    ? list.map((sh) => {
+        const nm = typeof sh === "string" ? sh : sh.name;
+        if (!nm) return "";
+        const checked = set.has(nm) ? " checked" : "";
+        return "<label class=\"staff-skill-cb\"><input type=\"checkbox\" name=\"" + escapeHtml(containerEl.dataset.cbName || "min_gap_shift") + "\" value=\"" + escapeHtml(nm) + "\"" + checked + " /> " + escapeHtml(nm) + "</label> ";
+      }).join("")
+    : "<span class=\"text-muted\">ยังไม่มีกะ — ไปที่หน้ากะเพิ่มก่อน</span>";
+}
+
+function renderMinGapRulesInputs(containerEl, rules) {
+  if (!containerEl) return;
+  const list = Array.isArray(shiftsCache) ? shiftsCache : [];
+  const map = new Map();
+  (Array.isArray(rules) ? rules : []).forEach((r) => {
+    if (r && typeof r === "object" && r.shift) map.set(String(r.shift), Number(r.gap_days) || "");
+  });
+  containerEl.innerHTML = list.length
+    ? list.map((sh) => {
+        const nm = typeof sh === "string" ? sh : sh.name;
+        if (!nm) return "";
+        const val = map.has(nm) ? map.get(nm) : "";
+        return "<div class=\"form-inline\" style=\"margin:0 0 .35rem 0\">" +
+          "<span style=\"min-width:10rem\">" + escapeHtml(nm) + "</span>" +
+          "<input type=\"number\" class=\"min-gap-rule-input\" data-shift=\"" + escapeHtml(nm) + "\" min=\"0\" max=\"30\" placeholder=\"—\" value=\"" + escapeHtml(String(val)) + "\" style=\"width:5rem\" />" +
+          "<span class=\"text-muted\" style=\"font-size:.82rem;margin:0\">วัน</span>" +
+          "</div>";
+      }).join("")
+    : "<span class=\"text-muted\">ยังไม่มีกะ — ไปที่หน้ากะเพิ่มก่อน</span>";
 }
 
 function renderStaffDetailForm(staff, catalogSkills, catalogTitles, catalogTimeWindows) {
@@ -223,6 +268,10 @@ function renderStaffDetailForm(staff, catalogSkills, catalogTitles, catalogTimeW
     "<div class=\"form-inline\" style=\"margin-bottom:0\">" +
     "<input type=\"number\" id=\"staff_edit_min_gap\" min=\"0\" max=\"30\" placeholder=\"—\" value=\"" + (staff.min_gap_days != null ? staff.min_gap_days : "") + "\" style=\"width:5rem\" />" +
     "<span class=\"text-muted\" style=\"font-size:.82rem;margin:0\">เช่น 6 = ห่างอย่างน้อย 6 วัน</span>" +
+    "</div>" +
+    "<div class=\"form-group\" style=\"margin-top:.5rem\">" +
+    "<label class=\"text-muted\" style=\"font-size:.82rem\">กำหนดเว้นขั้นต่ำแยกตามกะ (ใส่ตัวเลขเฉพาะกะที่อยากจำกัด)</label>" +
+    "<div id=\"staff_edit_min_gap_rules\" class=\"staff-skills-checkboxes\"></div>" +
     "</div></fieldset>" +
     "<fieldset class=\"form-section\"><legend>ทักษะ &amp; เวลา</legend>" +
     "<div class=\"form-group\" style=\"margin-top:0\"><label>ทักษะ</label><div id=\"staff_edit_skills\" class=\"staff-skills-checkboxes\">" +
@@ -273,6 +322,9 @@ async function showStaffDetail(staffId) {
     const timeWindowsList = Array.isArray(catalogTimeWindows) ? catalogTimeWindows : [];
     contentEl.innerHTML = renderStaffDetailForm(staff, skillsList, titlesList, timeWindowsList);
     contentEl.style.display = "";
+
+    const editGapRules = document.getElementById("staff_edit_min_gap_rules");
+    if (editGapRules) renderMinGapRulesInputs(editGapRules, staff.min_gap_rules || []);
 
     document.querySelectorAll("input[name='staff_edit_month_mode']").forEach((radio) => {
       radio.addEventListener("change", () => {
@@ -326,12 +378,15 @@ async function showStaffDetail(staffId) {
       const min_shifts_per_month = editMinEl && editMinEl.value !== "" ? parseInt(editMinEl.value, 10) : null;
       const max_shifts_per_month = editMaxEl && editMaxEl.value !== "" ? parseInt(editMaxEl.value, 10) : null;
       const min_gap_days = editGapEl && editGapEl.value !== "" ? parseInt(editGapEl.value, 10) : null;
+      const min_gap_rules = Array.from(document.querySelectorAll("#staff_edit_form .min-gap-rule-input"))
+        .map((el) => ({ shift: el.dataset.shift, gap_days: el.value !== "" ? parseInt(el.value, 10) : 0 }))
+        .filter((r) => r.shift && r.gap_days && r.gap_days > 0);
       msgEl.style.display = "none";
       try {
         const res = await fetch(API + "/staff/" + staffId, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, title, off_days, off_days_of_month, skills, time_windows, skill_levels, min_shifts_per_month, max_shifts_per_month, min_gap_days }),
+          body: JSON.stringify({ name, title, off_days, off_days_of_month, skills, time_windows, skill_levels, min_shifts_per_month, max_shifts_per_month, min_gap_days, min_gap_shifts: [], min_gap_rules }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -395,29 +450,69 @@ function renderStaffList(items) {
 
 function renderShiftList(items) {
   const ul = document.getElementById("shift_list");
-  ul.innerHTML = items
-    .map((s) => {
-      const posLabel = s.positions && s.positions.length
-        ? s.positions.map((p) => {
-            const name = typeof p === "string" ? p : p.name;
-            const n = typeof p === "object" && p.slot_count != null ? ` ×${p.slot_count}` : "";
-            const tw = typeof p === "object" && p.time_window_name ? ` [${p.time_window_name}]` : "";
-            let sk = "";
-            if (typeof p === "object" && p.required_skill) {
-              const lvlLabels = getSkillLevelLabels(p.required_skill);
-              const lvlName = lvlLabels[p.min_skill_level] || ("lv" + (p.min_skill_level || 1));
-              sk = ` 🔑${p.required_skill}≥${lvlName}`;
-            }
-            const at = typeof p === "object" && p.allowed_titles && p.allowed_titles.length ? ` [${p.allowed_titles.join("/")}]` : "";
-            const mpw = typeof p === "object" && p.max_per_week ? ` ≤${p.max_per_week}/wk` : "";
-            return name + n + tw + sk + at + mpw;
-          }).join(" | ")
-        : `donor: ${s.donor ?? 0}, xmatch: ${s.xmatch ?? 0}`;
-      return `<li data-id="${s.id}">
-          <span class="name">${escapeHtml(s.name)} — ${escapeHtml(posLabel)}</span>
-          <button type="button" class="small btn-edit-shift" data-id="${s.id}">แก้ไข</button>
-          <button class="small btn-delete-shift" data-id="${s.id}">ลบ</button>
-        </li>`;
+  function parseRoomAndKind(shiftName) {
+    const s = String(shiftName || "");
+    const parts = s.trim().split(/\s+/);
+    const room = parts.length >= 2 ? parts[parts.length - 1] : "";
+    let kind = "";
+    if (s.includes("เวรเช้า")) kind = "morning";
+    else if (s.includes("เวรบ่าย")) kind = "afternoon";
+    else if (s.includes("เวรดึก")) kind = "night";
+    else kind = "other";
+    return { room, kind };
+  }
+  const kindOrder = { morning: 1, afternoon: 2, night: 3, other: 99 };
+  const roomOrder = { Micro: 1, Hemato: 2, Immune: 3, Chem: 4 };
+
+  const arr = Array.isArray(items) ? items.slice() : [];
+  const sorted = arr
+    .map((s) => ({ ...s, _meta: parseRoomAndKind(s.name) }))
+    .sort((a, b) => {
+      const ra = roomOrder[a._meta.room] || 50;
+      const rb = roomOrder[b._meta.room] || 50;
+      if (ra !== rb) return ra - rb;
+      const ka = kindOrder[a._meta.kind] || 99;
+      const kb = kindOrder[b._meta.kind] || 99;
+      if (ka !== kb) return ka - kb;
+      return String(a.name).localeCompare(String(b.name));
+    });
+
+  const groups = {};
+  sorted.forEach((s) => {
+    const room = (s._meta && s._meta.room) ? s._meta.room : "อื่นๆ";
+    if (!groups[room]) groups[room] = [];
+    groups[room].push(s);
+  });
+  const groupNames = Object.keys(groups).sort((a, b) => (roomOrder[a] || 99) - (roomOrder[b] || 99) || a.localeCompare(b));
+
+  const renderRow = (s) => {
+    const posLabel = s.positions && s.positions.length
+      ? s.positions.map((p) => {
+          const name = typeof p === "string" ? p : p.name;
+          const n = typeof p === "object" && p.slot_count != null ? ` ×${p.slot_count}` : "";
+          const tw = typeof p === "object" && p.time_window_name ? ` [${p.time_window_name}]` : "";
+          let sk = "";
+          if (typeof p === "object" && p.required_skill) {
+            const lvlLabels = getSkillLevelLabels(p.required_skill);
+            const lvlName = lvlLabels[p.min_skill_level] || ("lv" + (p.min_skill_level || 1));
+            sk = ` 🔑${p.required_skill}≥${lvlName}`;
+          }
+          const at = typeof p === "object" && p.allowed_titles && p.allowed_titles.length ? ` [${p.allowed_titles.join("/")}]` : "";
+          const mpw = typeof p === "object" && p.max_per_week ? ` ≤${p.max_per_week}/wk` : "";
+          return name + n + tw + sk + at + mpw;
+        }).join(" | ")
+      : `donor: ${s.donor ?? 0}, xmatch: ${s.xmatch ?? 0}`;
+    return `<li data-id="${s.id}">
+        <span class="name">${escapeHtml(s.name)} — ${escapeHtml(posLabel)}</span>
+        <button type="button" class="small btn-edit-shift" data-id="${s.id}">แก้ไข</button>
+        <button class="small btn-delete-shift" data-id="${s.id}">ลบ</button>
+      </li>`;
+  };
+
+  ul.innerHTML = groupNames
+    .map((room) => {
+      const header = `<li class="shift-room-header">${escapeHtml(room)}</li>`;
+      return header + (groups[room] || []).map(renderRow).join("");
     })
     .join("");
   ul.querySelectorAll(".btn-edit-shift").forEach((btn) => {
@@ -592,18 +687,83 @@ function renderSchedule(data, staffList) {
     if (!shiftPositions[sn]) shiftPositions[sn] = [];
     if (!shiftPositions[sn].includes(pos)) shiftPositions[sn].push(pos);
   });
-  const shiftNames = Object.keys(shiftPositions).sort();
-  shiftNames.forEach((sn) => shiftPositions[sn].sort());
+  Object.keys(shiftPositions).forEach((sn) => shiftPositions[sn].sort());
 
-  let html = "<table><thead><tr><th>วัน</th>";
+  // --- Group/sort shifts by "room" suffix for readability (Template 5) ---
+  function parseRoomAndKind(shiftName) {
+    const s = String(shiftName || "");
+    const parts = s.trim().split(/\s+/);
+    const room = parts.length >= 2 ? parts[parts.length - 1] : "";
+    let kind = "";
+    if (s.includes("เวรเช้า")) kind = "morning";
+    else if (s.includes("เวรบ่าย")) kind = "afternoon";
+    else if (s.includes("เวรดึก")) kind = "night";
+    else kind = "other";
+    return { room, kind };
+  }
+  const kindOrder = { morning: 1, afternoon: 2, night: 3, other: 99 };
+  const roomOrder = { Micro: 1, Hemato: 2, Immune: 3, Chem: 4 };
+  const shiftsMeta = Object.keys(shiftPositions)
+    .map((sn) => ({ name: sn, ...parseRoomAndKind(sn) }))
+    .sort((a, b) => {
+      const ra = roomOrder[a.room] || 50;
+      const rb = roomOrder[b.room] || 50;
+      if (ra !== rb) return ra - rb;
+      const ka = kindOrder[a.kind] || 99;
+      const kb = kindOrder[b.kind] || 99;
+      if (ka !== kb) return ka - kb;
+      return a.name.localeCompare(b.name);
+    });
+  const shiftNames = shiftsMeta.map((m) => m.name);
+  const hasRooms = shiftsMeta.some((m) => m.room);
+
+  // Header rows:
+  // 1) Room group (optional)
+  // 2) Shift name
+  // 3) Position
+  let html = "<table><thead>";
+  if (hasRooms) {
+    html += "<tr><th class=\"th-day\" rowspan=\"3\">วัน</th>";
+    let i = 0;
+    while (i < shiftsMeta.length) {
+      const room = shiftsMeta[i].room || "อื่นๆ";
+      let colSpan = 0;
+      let j = i;
+      while (j < shiftsMeta.length && (shiftsMeta[j].room || "อื่นๆ") === room) {
+        const sn = shiftsMeta[j].name;
+        colSpan += (shiftPositions[sn] || []).length || 1;
+        j++;
+      }
+      html += `<th class="th-room" colspan="${colSpan}">${escapeHtml(room)}</th>`;
+      i = j;
+    }
+    html += "</tr>";
+  } else {
+    html += "<tr><th class=\"th-day\" rowspan=\"2\">วัน</th>";
+    shiftNames.forEach((sn) => {
+      const cols = (shiftPositions[sn] || []).length || 1;
+      html += `<th colspan="${cols}">${escapeHtml(sn)}</th>`;
+    });
+    html += "</tr>";
+  }
+
+  // Shift row (always)
+  html += "<tr>";
   shiftNames.forEach((sn) => {
     const cols = (shiftPositions[sn] || []).length || 1;
-    html += `<th colspan="${cols}">${escapeHtml(sn)}</th>`;
+    const meta = shiftsMeta.find((m) => m.name === sn) || {};
+    const room = meta.room || "";
+    html += `<th class="th-shift" data-room="${escapeHtml(room)}" colspan="${cols}">${escapeHtml(sn)}</th>`;
   });
-  html += "</tr><tr><th></th>";
+  html += "</tr>";
+
+  // Position row
+  html += "<tr>";
   shiftNames.forEach((sn) => {
+    const meta = shiftsMeta.find((m) => m.name === sn) || {};
+    const room = meta.room || "";
     (shiftPositions[sn] || ["ช่อง"]).forEach((pos) => {
-      html += `<th>${escapeHtml(pos)}</th>`;
+      html += `<th class="th-pos" data-room="${escapeHtml(room)}">${escapeHtml(pos)}</th>`;
     });
   });
   html += "</tr></thead><tbody>";
@@ -617,12 +777,17 @@ function renderSchedule(data, staffList) {
   days.forEach((day) => {
     const dayLabel = formatDayLabel(day, startDate);
     html += `<tr><td>${escapeHtml(dayLabel)}</td>`;
+    let prevRoom = null;
     shiftNames.forEach((sn) => {
+      const meta = shiftsMeta.find((m) => m.name === sn) || {};
+      const room = meta.room || "";
       const shiftHasAnySlotToday = shiftActiveOnDay[`${day}-${sn}`];
       (shiftPositions[sn] || []).forEach((pos) => {
         const slotList = byDayShiftPos[`${day}-${sn}-${pos}`] || [];
         if (slotList.length === 0) {
-          html += shiftHasAnySlotToday ? "<td></td>" : `<td class="td-inactive" title="กะนี้ไม่เปิดวันนี้">—</td>`;
+          const cls = (room && prevRoom !== null && room !== prevRoom) ? " td-room-sep" : "";
+          html += shiftHasAnySlotToday ? `<td class="${cls.trim()}"></td>` : `<td class="td-inactive${cls}" title="กะนี้ไม่เปิดวันนี้">—</td>`;
+          prevRoom = room || prevRoom;
           return;
         }
         const hasDummy = slotList.some((s) => s.is_dummy);
@@ -635,7 +800,10 @@ function renderSchedule(data, staffList) {
             ? `${escapeHtml(s.staff_name)} <small class="tw-label">(${escapeHtml(s.time_window)})</small>`
             : escapeHtml(s.staff_name);
         });
-        html += `<td${hasDummy ? ' class="td-has-dummy"' : ""}>${parts.join(", ")}</td>`;
+        const sepClass = (room && prevRoom !== null && room !== prevRoom) ? " td-room-sep" : "";
+        const cls = (hasDummy ? "td-has-dummy" : "") + sepClass;
+        html += `<td${cls.trim() ? ` class="${cls.trim()}"` : ""}>${parts.join(", ")}</td>`;
+        prevRoom = room || prevRoom;
       });
     });
     html += "</tr>";
@@ -645,8 +813,16 @@ function renderSchedule(data, staffList) {
 
   // Attach click handlers to dummy spans
   const sf = staffList || [];
+  // busyByDay[day] = Set(staff_name) who already has any non-dummy slot that day
+  const busyByDay = {};
+  (data.slots || []).forEach((s) => {
+    if (s.is_dummy) return;
+    const d = Number(s.day);
+    if (!busyByDay[d]) busyByDay[d] = new Set();
+    busyByDay[d].add(s.staff_name);
+  });
   wrap.querySelectorAll(".cell-dummy").forEach((span) => {
-    span.addEventListener("click", () => handleDummyClick(span, sf, runId));
+    span.addEventListener("click", () => handleDummyClick(span, sf, runId, busyByDay));
   });
 
   // Summary stats
@@ -695,7 +871,7 @@ function renderScheduleSummary(slots, staffList) {
   wrap.after(div);
 }
 
-async function handleDummyClick(span, staffList, runId) {
+async function handleDummyClick(span, staffList, runId, busyByDay) {
   if (span.dataset.loading) return;
   const day = parseInt(span.dataset.day, 10);
   const shiftName = span.dataset.shift;
@@ -713,10 +889,13 @@ async function handleDummyClick(span, staffList, runId) {
   ph.value = "";
   ph.textContent = "— เลือกบุคลากร —";
   select.appendChild(ph);
+  const busy = busyByDay && busyByDay[day] ? busyByDay[day] : new Set();
   staffList.forEach((mt) => {
     const opt = document.createElement("option");
     opt.value = mt.name;
-    opt.textContent = mt.name;
+    const isBusy = busy.has(mt.name);
+    opt.textContent = isBusy ? `${mt.name} (มีเวรแล้ว)` : mt.name;
+    if (isBusy) opt.disabled = true;
     select.appendChild(opt);
   });
 
@@ -727,7 +906,7 @@ async function handleDummyClick(span, staffList, runId) {
     ns.textContent = "ว่าง";
     Object.assign(ns.dataset, { run: runId, day, shift: shiftName, pos: position, slot: slotIndex });
     select.replaceWith(ns);
-    ns.addEventListener("click", () => handleDummyClick(ns, staffList, runId));
+    ns.addEventListener("click", () => handleDummyClick(ns, staffList, runId, busyByDay));
   };
 
   span.replaceWith(select);
@@ -765,6 +944,8 @@ async function refreshShifts() {
   const list = await loadShifts();
   shiftsCache = Array.isArray(list) ? list : [];
   renderShiftList(list);
+  const addGapRules = document.getElementById("staff_add_min_gap_rules");
+  if (addGapRules) renderMinGapRulesInputs(addGapRules, []);
   lastCounts.shifts = list.length;
   updateNavBadges();
   updateHomeProcessSteps();
@@ -1177,11 +1358,14 @@ document.getElementById("add_staff").addEventListener("click", async () => {
   const min_shifts_per_month = minShiftsEl && minShiftsEl.value !== "" ? parseInt(minShiftsEl.value, 10) : null;
   const max_shifts_per_month = maxShiftsEl && maxShiftsEl.value !== "" ? parseInt(maxShiftsEl.value, 10) : null;
   const min_gap_days = minGapEl && minGapEl.value !== "" ? parseInt(minGapEl.value, 10) : null;
+  const min_gap_rules = Array.from(document.querySelectorAll("#staff_add_min_gap_rules .min-gap-rule-input"))
+    .map((el) => ({ shift: el.dataset.shift, gap_days: el.value !== "" ? parseInt(el.value, 10) : 0 }))
+    .filter((r) => r.shift && r.gap_days && r.gap_days > 0);
   try {
     const r = await fetch(API + "/staff", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, title, off_days, off_days_of_month, skills, time_windows, min_shifts_per_month, max_shifts_per_month, min_gap_days }),
+      body: JSON.stringify({ name, title, off_days, off_days_of_month, skills, time_windows, min_shifts_per_month, max_shifts_per_month, min_gap_days, min_gap_shifts: [], min_gap_rules }),
     });
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
@@ -1198,6 +1382,7 @@ document.getElementById("add_staff").addEventListener("click", async () => {
   if (addOffMonthEl) addOffMonthEl.value = "";
   if (minShiftsEl) minShiftsEl.value = "";
   if (maxShiftsEl) maxShiftsEl.value = "";
+  document.querySelectorAll("#staff_add_min_gap_rules .min-gap-rule-input").forEach((el) => { el.value = ""; });
   document.querySelectorAll("#staff_add_time_windows input[type=checkbox]").forEach((cb) => { cb.checked = false; });
   await refreshStaff();
 });
@@ -1576,6 +1761,7 @@ async function applyTemplate(templateId) {
 
 document.getElementById("template_1").addEventListener("click", () => applyTemplate(1));
 document.getElementById("template_2").addEventListener("click", () => applyTemplate(2));
+document.getElementById("template_5").addEventListener("click", () => applyTemplate(5));
 document.getElementById("template_3").addEventListener("click", () => applyTemplate(3));
 document.getElementById("template_4").addEventListener("click", () => applyTemplate(4));
 

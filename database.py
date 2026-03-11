@@ -184,6 +184,8 @@ def init_db(conn=None):
         _migrate_skill_level_table(conn)
         _migrate_staff_min_max_shifts(conn)
         _migrate_staff_min_gap_days(conn)
+        _migrate_staff_min_gap_shifts(conn)
+        _migrate_staff_min_gap_rules(conn)
         _migrate_shift_include_holidays(conn)
         _migrate_staff_pair(conn)
     finally:
@@ -205,6 +207,24 @@ def _migrate_staff_min_gap_days(conn):
     """เพิ่มคอลัมน์ min_gap_days ให้ตาราง staff — ห่างกันอย่างน้อยกี่วัน"""
     try:
         conn.execute("ALTER TABLE staff ADD COLUMN min_gap_days INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _migrate_staff_min_gap_shifts(conn):
+    """เพิ่มคอลัมน์ min_gap_shifts ให้ตาราง staff — จำกัดขอบเขต min_gap_days เฉพาะบางกะ (JSON list)"""
+    try:
+        conn.execute("ALTER TABLE staff ADD COLUMN min_gap_shifts TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _migrate_staff_min_gap_rules(conn):
+    """เพิ่มคอลัมน์ min_gap_rules ให้ตาราง staff — กำหนดเว้นขั้นต่ำแยกตามกะ (JSON list of objects)"""
+    try:
+        conn.execute("ALTER TABLE staff ADD COLUMN min_gap_rules TEXT")
         conn.commit()
     except sqlite3.OperationalError:
         pass
@@ -702,14 +722,40 @@ def get_mt_list(conn=None):
     conn = conn or get_connection()
     try:
         rows = conn.execute(
-            "SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days FROM staff ORDER BY id"
+            "SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts, ''), COALESCE(min_gap_rules, '') FROM staff ORDER BY id"
         ).fetchall()
         if not rows:
             return []
         staff_ids = [r[0] for r in rows]
         off_days_map, off_month_map, skills_map, skill_levels_map, tw_map = _batch_load_staff_data(conn, staff_ids)
         mt_list = []
-        for sid, name, stype, title, mn, mx, gap in rows:
+        for sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw in rows:
+            try:
+                gap_shifts = json.loads(gap_shifts_raw) if gap_shifts_raw else []
+                if not isinstance(gap_shifts, list):
+                    gap_shifts = []
+                gap_shifts = [str(s).strip() for s in gap_shifts if str(s).strip()]
+            except Exception:
+                gap_shifts = []
+            try:
+                gap_rules = json.loads(gap_rules_raw) if gap_rules_raw else []
+                if not isinstance(gap_rules, list):
+                    gap_rules = []
+                norm = []
+                for it in gap_rules:
+                    if not isinstance(it, dict):
+                        continue
+                    sh = str(it.get("shift") or "").strip()
+                    gd = it.get("gap_days")
+                    try:
+                        gd = int(gd)
+                    except Exception:
+                        gd = 0
+                    if sh and gd > 0:
+                        norm.append({"shift": sh, "gap_days": gd})
+                gap_rules = norm
+            except Exception:
+                gap_rules = []
             mt_list.append({
                 "name": name,
                 "type": stype,
@@ -722,6 +768,8 @@ def get_mt_list(conn=None):
                 "min_shifts_per_month": mn,
                 "max_shifts_per_month": mx,
                 "min_gap_days": gap,
+                "min_gap_shifts": gap_shifts,
+                "min_gap_rules": gap_rules,
             })
         return mt_list
     finally:
@@ -734,28 +782,58 @@ def list_staff(conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        rows = conn.execute("SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days FROM staff ORDER BY id").fetchall()
+        rows = conn.execute("SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts,''), COALESCE(min_gap_rules,'') FROM staff ORDER BY id").fetchall()
         if not rows:
             return []
         staff_ids = [r[0] for r in rows]
         off_days_map, off_month_map, skills_map, skill_levels_map, tw_map = _batch_load_staff_data(conn, staff_ids)
-        return [
-            {
-                "id": sid,
-                "name": name,
-                "type": stype,
-                "title": title or "",
-                "off_days": off_days_map.get(sid, []),
-                "off_days_of_month": off_month_map.get(sid, []),
-                "skills": skills_map.get(sid, []),
-                "skill_levels": skill_levels_map.get(sid, {}),
-                "time_windows": tw_map.get(sid, []),
-                "min_shifts_per_month": mn,
-                "max_shifts_per_month": mx,
-                "min_gap_days": gap,
-            }
-            for sid, name, stype, title, mn, mx, gap in rows
-        ]
+        result = []
+        for sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw in rows:
+            try:
+                gap_shifts = json.loads(gap_shifts_raw) if gap_shifts_raw else []
+                if not isinstance(gap_shifts, list):
+                    gap_shifts = []
+                gap_shifts = [str(s).strip() for s in gap_shifts if str(s).strip()]
+            except Exception:
+                gap_shifts = []
+            try:
+                gap_rules = json.loads(gap_rules_raw) if gap_rules_raw else []
+                if not isinstance(gap_rules, list):
+                    gap_rules = []
+                norm = []
+                for it in gap_rules:
+                    if not isinstance(it, dict):
+                        continue
+                    sh = str(it.get("shift") or "").strip()
+                    gd = it.get("gap_days")
+                    try:
+                        gd = int(gd)
+                    except Exception:
+                        gd = 0
+                    if sh and gd > 0:
+                        norm.append({"shift": sh, "gap_days": gd})
+                gap_rules = norm
+            except Exception:
+                gap_rules = []
+            result.append(
+                {
+                    "id": sid,
+                    "name": name,
+                    "type": stype,
+                    "title": title or "",
+                    "off_days": off_days_map.get(sid, []),
+                    "off_days_of_month": off_month_map.get(sid, []),
+                    "skills": skills_map.get(sid, []),
+                    "skill_levels": skill_levels_map.get(sid, {}),
+                    "time_windows": tw_map.get(sid, []),
+                    "min_shifts_per_month": mn,
+                    "max_shifts_per_month": mx,
+                    "min_gap_days": gap,
+                    "min_gap_shifts": gap_shifts,
+                    "min_gap_rules": gap_rules,
+                }
+            )
+        return result
     finally:
         if close:
             conn.close()
@@ -766,34 +844,83 @@ def get_staff(staff_id: int, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        row = conn.execute("SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days FROM staff WHERE id = ?", (staff_id,)).fetchone()
+        row = conn.execute("SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts,''), COALESCE(min_gap_rules,'') FROM staff WHERE id = ?", (staff_id,)).fetchone()
         if not row:
             return None
-        sid, name, stype, title, mn, mx, gap = row
+        sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw = row
+        try:
+            gap_shifts = json.loads(gap_shifts_raw) if gap_shifts_raw else []
+            if not isinstance(gap_shifts, list):
+                gap_shifts = []
+            gap_shifts = [str(s).strip() for s in gap_shifts if str(s).strip()]
+        except Exception:
+            gap_shifts = []
+        try:
+            gap_rules = json.loads(gap_rules_raw) if gap_rules_raw else []
+            if not isinstance(gap_rules, list):
+                gap_rules = []
+            norm = []
+            for it in gap_rules:
+                if not isinstance(it, dict):
+                    continue
+                sh = str(it.get("shift") or "").strip()
+                gd = it.get("gap_days")
+                try:
+                    gd = int(gd)
+                except Exception:
+                    gd = 0
+                if sh and gd > 0:
+                    norm.append({"shift": sh, "gap_days": gd})
+            gap_rules = norm
+        except Exception:
+            gap_rules = []
         off_days = [r[0] for r in conn.execute("SELECT day FROM staff_off_day WHERE staff_id = ? ORDER BY day", (sid,)).fetchall()]
         off_days_of_month = [r[0] for r in conn.execute("SELECT day FROM staff_off_day_of_month WHERE staff_id = ? ORDER BY day", (sid,)).fetchall()]
         skills = [r[0] for r in conn.execute("SELECT skill FROM staff_skill WHERE staff_id = ? ORDER BY skill", (sid,)).fetchall()]
         skill_levels = {r[0]: int(r[1] or 1) for r in conn.execute("SELECT skill, COALESCE(level, 1) FROM staff_skill WHERE staff_id = ?", (sid,)).fetchall()}
         time_windows = [r[0] for r in conn.execute("SELECT time_window_name FROM staff_time_window WHERE staff_id = ? ORDER BY time_window_name", (sid,)).fetchall()]
-        return {"id": sid, "name": name, "type": stype, "title": title or "", "off_days": off_days, "off_days_of_month": off_days_of_month, "skills": skills, "skill_levels": skill_levels, "time_windows": time_windows, "min_shifts_per_month": mn, "max_shifts_per_month": mx, "min_gap_days": gap}
+        return {"id": sid, "name": name, "type": stype, "title": title or "", "off_days": off_days, "off_days_of_month": off_days_of_month, "skills": skills, "skill_levels": skill_levels, "time_windows": time_windows, "min_shifts_per_month": mn, "max_shifts_per_month": mx, "min_gap_days": gap, "min_gap_shifts": gap_shifts, "min_gap_rules": gap_rules}
     finally:
         if close:
             conn.close()
 
 
-def create_staff(name, off_days=None, skills=None, title=None, off_days_of_month=None, time_windows=None, min_shifts_per_month=None, max_shifts_per_month=None, min_gap_days=None, conn=None):
+def create_staff(name, off_days=None, skills=None, title=None, off_days_of_month=None, time_windows=None, min_shifts_per_month=None, max_shifts_per_month=None, min_gap_days=None, min_gap_shifts=None, min_gap_rules=None, conn=None):
     off_days = off_days or []
     skills = skills or []
     off_days_of_month = off_days_of_month or []
     time_windows = time_windows or []
+    min_gap_shifts = [str(s).strip() for s in (min_gap_shifts or []) if str(s).strip()]
+    min_gap_rules = min_gap_rules or []
+    norm_gap_rules = []
+    for it in min_gap_rules if isinstance(min_gap_rules, list) else []:
+        if not isinstance(it, dict):
+            continue
+        sh = str(it.get("shift") or "").strip()
+        gd = it.get("gap_days")
+        try:
+            gd = int(gd)
+        except Exception:
+            gd = 0
+        if sh and gd > 0:
+            norm_gap_rules.append({"shift": sh, "gap_days": gd})
     title = (title or "").strip() or None
     close = conn is None
     conn = conn or get_connection()
     try:
         stype = get_title_type(title or "", conn)
         cur = conn.execute(
-            "INSERT INTO staff (name, type, title, min_shifts_per_month, max_shifts_per_month, min_gap_days) VALUES (?, ?, ?, ?, ?, ?)",
-            (name, stype, title, min_shifts_per_month, max_shifts_per_month, min_gap_days),
+            "INSERT INTO staff (name, type, title, min_shifts_per_month, max_shifts_per_month, min_gap_days, min_gap_shifts, min_gap_rules) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                name,
+                stype,
+                title,
+                min_shifts_per_month,
+                max_shifts_per_month,
+                min_gap_days,
+                json.dumps(min_gap_shifts, ensure_ascii=False) if min_gap_shifts else None,
+                json.dumps(norm_gap_rules, ensure_ascii=False) if norm_gap_rules else None,
+            ),
         )
         sid = cur.lastrowid
         for d in off_days:
@@ -816,20 +943,44 @@ def create_staff(name, off_days=None, skills=None, title=None, off_days_of_month
             conn.close()
 
 
-def update_staff(sid, name, off_days=None, skills=None, title=None, off_days_of_month=None, time_windows=None, skill_levels=None, min_shifts_per_month=None, max_shifts_per_month=None, min_gap_days=None, conn=None):
+def update_staff(sid, name, off_days=None, skills=None, title=None, off_days_of_month=None, time_windows=None, skill_levels=None, min_shifts_per_month=None, max_shifts_per_month=None, min_gap_days=None, min_gap_shifts=None, min_gap_rules=None, conn=None):
     off_days = off_days or []
     skills = skills or []
     off_days_of_month = off_days_of_month or []
     time_windows = time_windows or []
     skill_levels = skill_levels or {}
+    min_gap_shifts = [str(s).strip() for s in (min_gap_shifts or []) if str(s).strip()]
+    min_gap_rules = min_gap_rules or []
+    norm_gap_rules = []
+    for it in min_gap_rules if isinstance(min_gap_rules, list) else []:
+        if not isinstance(it, dict):
+            continue
+        sh = str(it.get("shift") or "").strip()
+        gd = it.get("gap_days")
+        try:
+            gd = int(gd)
+        except Exception:
+            gd = 0
+        if sh and gd > 0:
+            norm_gap_rules.append({"shift": sh, "gap_days": gd})
     title = (title or "").strip() or None
     close = conn is None
     conn = conn or get_connection()
     try:
         stype = get_title_type(title or "", conn)
         conn.execute(
-            "UPDATE staff SET name = ?, type = ?, title = ?, min_shifts_per_month = ?, max_shifts_per_month = ?, min_gap_days = ? WHERE id = ?",
-            (name, stype, title, min_shifts_per_month, max_shifts_per_month, min_gap_days, sid),
+            "UPDATE staff SET name = ?, type = ?, title = ?, min_shifts_per_month = ?, max_shifts_per_month = ?, min_gap_days = ?, min_gap_shifts = ?, min_gap_rules = ? WHERE id = ?",
+            (
+                name,
+                stype,
+                title,
+                min_shifts_per_month,
+                max_shifts_per_month,
+                min_gap_days,
+                json.dumps(min_gap_shifts, ensure_ascii=False) if min_gap_shifts else None,
+                json.dumps(norm_gap_rules, ensure_ascii=False) if norm_gap_rules else None,
+                sid,
+            ),
         )
         conn.execute("DELETE FROM staff_off_day WHERE staff_id = ?", (sid,))
         conn.execute("DELETE FROM staff_off_day_of_month WHERE staff_id = ?", (sid,))
@@ -984,7 +1135,7 @@ TEMPLATE_1_TW_DISTRIBUTION = [
 
 
 def create_shift_from_template(template_id: int, name_override: str | None = None, conn=None):
-    """Create a shift from template 1, 2, 3, or 4. Returns new shift id."""
+    """Create a shift from template 1, 2, 3, 4, or 5. Returns new shift id."""
     close = conn is None
     conn = conn or get_connection()
     try:
@@ -1065,6 +1216,62 @@ def create_shift_from_template(template_id: int, name_override: str | None = Non
             )
             return s1
 
+        if template_id == 5:
+            # Multi-room version of Template 2: same counts/structure per room
+            TW_DAY  = "08:00-16:00"
+            TW_AFT  = "16:00-20:00"
+            TW_EVE  = "16:00-24:00"
+            TW_NITE = "00:00-08:00"
+            for tw_name, t_start, t_end in [
+                (TW_DAY,  "08:00", "16:00"),
+                (TW_AFT,  "16:00", "20:00"),
+                (TW_EVE,  "16:00", "24:00"),
+                (TW_NITE, "00:00", "08:00"),
+            ]:
+                conn.execute(
+                    "INSERT OR IGNORE INTO time_window_catalog (name, start_time, end_time) VALUES (?, ?, ?)",
+                    (tw_name, t_start, t_end),
+                )
+            conn.commit()
+
+            TITLE_FT = "MT เต็มเวลา"
+            TITLE_PT = "MT พาร์ทไทม์"
+            rooms = ["Micro", "Hemato", "Immune", "Chem"]
+
+            first_id = None
+            for room in rooms:
+                # Morning: weekend + holidays, 3 FT
+                s1 = create_shift(
+                    f"เวรเช้า {room}", donor=0, xmatch=0,
+                    active_days="5,6", include_holidays=True,
+                    positions=[
+                        {"name": "เช้า 1", "constraint_note": "เต็มเวลาเท่านั้น", "slot_count": 1, "time_window_name": TW_DAY, "allowed_titles": [TITLE_FT]},
+                        {"name": "เช้า 2", "constraint_note": "เต็มเวลาเท่านั้น", "slot_count": 1, "time_window_name": TW_DAY, "allowed_titles": [TITLE_FT]},
+                        {"name": "เช้า 3", "constraint_note": "เต็มเวลาเท่านั้น", "slot_count": 1, "time_window_name": TW_DAY, "allowed_titles": [TITLE_FT]},
+                    ],
+                    conn=conn,
+                )
+                # Afternoon: daily, 2 FT
+                create_shift(
+                    f"เวรบ่าย {room}", donor=0, xmatch=0, active_days=None,
+                    positions=[
+                        {"name": "บ่าย 16-20", "constraint_note": "16:00-20:00 เต็มเวลา", "slot_count": 1, "time_window_name": TW_AFT, "allowed_titles": [TITLE_FT]},
+                        {"name": "บ่าย 16-24", "constraint_note": "16:00-24:00 เต็มเวลา", "slot_count": 1, "time_window_name": TW_EVE, "allowed_titles": [TITLE_FT]},
+                    ],
+                    conn=conn,
+                )
+                # Night: daily, 1 PT
+                create_shift(
+                    f"เวรดึก {room}", donor=0, xmatch=0, active_days=None,
+                    positions=[
+                        {"name": "ดึก", "constraint_note": "00:00-08:00 พาร์ทไทม์", "slot_count": 1, "time_window_name": TW_NITE, "allowed_titles": [TITLE_PT]},
+                    ],
+                    conn=conn,
+                )
+                if first_id is None:
+                    first_id = s1
+            return first_id or 0
+
         if template_id == 3:
             name = name_override or f"กะเทมเพลต {template_id} (ยังไม่เสร็จ)"
             positions = [{"name": "ช่อง 1", "constraint_note": "", "regular_only": False}, {"name": "ช่อง 2", "constraint_note": "", "regular_only": False}]
@@ -1079,7 +1286,7 @@ def create_shift_from_template(template_id: int, name_override: str | None = Non
             ]
             sid = create_shift(name, donor=0, xmatch=0, positions=positions, conn=conn)
             return sid
-        raise ValueError("template_id must be 1, 2, 3, or 4")
+        raise ValueError("template_id must be 1, 2, 3, 4, or 5")
     finally:
         if close:
             conn.close()
@@ -1308,6 +1515,21 @@ def update_slot_staff(run_id, day, shift_name, position, slot_index, new_staff_n
     close = conn is None
     conn = conn or get_connection()
     try:
+        # Guard: ห้ามคนเดียวกันมีเวรมากกว่า 1 ช่องในวันเดียวกัน (กัน "แยกร่าง")
+        existing = conn.execute(
+            """
+            SELECT shift_name, position, slot_index
+            FROM schedule_slot
+            WHERE run_id = ? AND day = ? AND staff_name = ?
+              AND NOT (shift_name = ? AND position = ? AND slot_index = ?)
+            LIMIT 1
+            """,
+            (run_id, day, new_staff_name, shift_name, position, slot_index),
+        ).fetchone()
+        if existing:
+            raise ValueError(
+                f"'{new_staff_name}' มีเวรแล้วในวันเดียวกัน ({existing[0]} / {existing[1]} / ช่อง {existing[2]})"
+            )
         conn.execute(
             "UPDATE schedule_slot SET staff_name = ? WHERE run_id = ? AND day = ? AND shift_name = ? AND position = ? AND slot_index = ?",
             (new_staff_name, run_id, day, shift_name, position, slot_index),
@@ -1327,6 +1549,8 @@ def _default_shift_name_for_template(template_id: int) -> str:
         return f"กะเทมเพลต {template_id} (ยังไม่เสร็จ)"
     if template_id == 4:
         return "กะตัวอย่าง (จัดไม่ได้)"
+    if template_id == 5:
+        return None
     return ""
 
 
@@ -1395,7 +1619,7 @@ def apply_template(template_id: int, conn=None):
                 if row:
                     conn.execute("INSERT OR IGNORE INTO staff_skill (staff_id, skill, level) VALUES (?, ?, ?)", (row[0], TEMPLATE_1_PHLEBOTOMY_SKILL, skill_lvl))
             conn.commit()
-        if template_id == 2:
+        if template_id in (2, 5):
             conn.execute("INSERT OR IGNORE INTO title_catalog (name, type) VALUES ('MT เต็มเวลา', 'fulltime')")
             conn.execute("INSERT OR IGNORE INTO title_catalog (name, type) VALUES ('MT พาร์ทไทม์', 'parttime')")
             conn.commit()
@@ -1429,10 +1653,18 @@ def apply_template(template_id: int, conn=None):
                     conn.execute("INSERT OR IGNORE INTO staff_off_day (staff_id, day) VALUES (?, ?)", (staff_id, d))
                 for dm in off_month:
                     conn.execute("INSERT OR IGNORE INTO staff_off_day_of_month (staff_id, day) VALUES (?, ?)", (staff_id, dm))
-            # อาหลิวสุดหล่อ: min_gap_days=6 (ห่างกันอย่างน้อย 6 วัน ≈ 1 ดึก/สัปดาห์)
+            # กันพลาด: เคลียร์ค่าเว้นขั้นต่ำ (ถ้ามีจาก schema/ข้อมูลเก่า)
+            try:
+                conn.execute("UPDATE staff SET min_gap_days = NULL, min_gap_shifts = NULL, min_gap_rules = NULL")
+            except Exception:
+                pass
+            # อาหลิวสุดหล่อ: เว้นเฉพาะเวรดึก Micro อย่างน้อย 6 วัน (≈ 1 ดึก/สัปดาห์)
             row = conn.execute("SELECT id FROM staff WHERE name = 'อาหลิวสุดหล่อ'").fetchone()
             if row:
-                conn.execute("UPDATE staff SET min_gap_days = 6 WHERE id = ?", (row[0],))
+                conn.execute(
+                    "UPDATE staff SET min_gap_days = NULL, min_gap_shifts = NULL, min_gap_rules = ? WHERE id = ?",
+                    (json.dumps([{"shift": "เวรดึก Micro", "gap_days": 6}], ensure_ascii=False), row[0]),
+                )
             conn.commit()
             # Set April 2026 schedule settings
             set_num_days(30, conn=conn)
@@ -1548,6 +1780,8 @@ def import_all_data(data, conn=None):
                 min_shifts_per_month=st.get("min_shifts_per_month"),
                 max_shifts_per_month=st.get("max_shifts_per_month"),
                 min_gap_days=st.get("min_gap_days"),
+                min_gap_shifts=st.get("min_gap_shifts", []),
+                min_gap_rules=st.get("min_gap_rules", []),
                 conn=conn,
             )
             skill_levels = st.get("skill_levels") or {}
