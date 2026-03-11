@@ -175,12 +175,23 @@ if STATIC_DIR.exists():
 
 
 # --- Workspace dependency (async so contextvar propagates to sync endpoint threads) ---
+# โหมด dev: ไม่ตั้ง API_KEY = ข้าม workspace token (ใช้ได้เลย)
+# โหมด production: ตั้ง API_KEY = ต้องมี workspace token
+_ws_auth_env = os.environ.get("DISABLE_WORKSPACE_AUTH", "").lower()
+_DISABLE_WORKSPACE_AUTH = (
+    _ws_auth_env in ("1", "true", "yes")
+    or (not _API_KEY and _ws_auth_env != "0" and _ws_auth_env != "false")
+)
+if _DISABLE_WORKSPACE_AUTH:
+    logger.info("Workspace token check OFF (dev mode). Set API_KEY + DISABLE_WORKSPACE_AUTH=0 for production.")
+
+
 async def workspace_dep(workspace_id: str, x_workspace_token: str | None = Header(default=None)):
     """FastAPI dependency: validate workspace exists AND token matches"""
     ws = get_workspace(workspace_id)
     if ws is None:
         raise HTTPException(status_code=404, detail="Workspace not found")
-    if not verify_workspace_token(workspace_id, x_workspace_token or ""):
+    if not _DISABLE_WORKSPACE_AUTH and not verify_workspace_token(workspace_id, x_workspace_token or ""):
         logger.warning("Rejected workspace access: id=%s invalid token", workspace_id)
         raise HTTPException(status_code=403, detail="Invalid or missing workspace token")
     set_workspace_context(workspace_id)
@@ -910,7 +921,8 @@ def api_create_workspace(body: WorkspaceCreate = Body(WorkspaceCreate())):
 
 @app.get("/api/workspaces", dependencies=[Depends(verify_api_key)])
 def api_list_workspaces():
-    return list_workspaces()
+    # dev mode (no API_KEY) → ส่ง token กลับมาด้วยเพื่อให้ browser sync
+    return list_workspaces(include_tokens=_DISABLE_WORKSPACE_AUTH)
 
 
 @app.delete("/api/workspaces/{workspace_id}", dependencies=[Depends(verify_api_key)])

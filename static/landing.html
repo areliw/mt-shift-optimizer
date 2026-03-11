@@ -115,10 +115,20 @@ function _saveTokens(t) { localStorage.setItem('ws_tokens', JSON.stringify(t)); 
 async function loadWorkspaces() {
   try {
     const r = await fetch('/api/workspaces');
+    if (!r.ok) { document.getElementById('wsList').innerHTML = '<p class="empty-msg">โหลดไม่สำเร็จ ('+r.status+')</p>'; return; }
     const list = await r.json();
     const tokens = _getTokens();
+
+    // ถ้า server ส่ง token มาด้วย (dev mode) → sync เข้า localStorage ทั้งหมด
+    for (const ws of list) {
+      if (ws.token && !tokens[ws.id]) {
+        tokens[ws.id] = ws.token;
+      }
+    }
+    _saveTokens(tokens);
+
     // แสดงเฉพาะ workspace ที่เครื่องนี้มี token
-    const mine = list.filter(ws => tokens[ws.id] !== undefined);
+    const mine = list.filter(ws => tokens[ws.id]);
     const el = document.getElementById('wsList');
     if (!mine.length) {
       el.innerHTML = '<p class="empty-msg">ยังไม่มี workspace ในเครื่องนี้ — สร้างใหม่ได้เลย</p>';
@@ -128,10 +138,13 @@ async function loadWorkspaces() {
     for (const ws of mine) {
       const name = ws.name || ('Workspace ' + ws.id);
       const date = ws.created_at ? new Date(ws.created_at + 'Z').toLocaleDateString('th-TH') : '';
+      const tok = tokens[ws.id] || '';
+      // ใส่ token ใน hash เพื่อให้หน้า workspace อ่านได้ถ้า localStorage หาย
+      const href = '/w/' + ws.id + '/#t=' + encodeURIComponent(tok);
       const item = document.createElement('div');
       item.className = 'ws-item';
       const link = document.createElement('a');
-      link.href = '/w/' + ws.id + '/';
+      link.href = href;
       link.style.cssText = 'text-decoration:none;color:inherit;flex:1';
       link.innerHTML = '<div class="ws-name">' + escHtml(name) + '</div><div class="ws-date">' + date + '</div>';
       const right = document.createElement('div');
@@ -140,10 +153,10 @@ async function loadWorkspaces() {
       del.className = 'ws-delete';
       del.title = 'ลบ workspace';
       del.textContent = '\u00d7';
-      del.onclick = function(e) { e.stopPropagation(); deleteWorkspace(ws.id, name, tokens[ws.id]); };
+      del.onclick = function(e) { e.stopPropagation(); deleteWorkspace(ws.id, name, tok); };
       right.appendChild(del);
       const arrow = document.createElement('a');
-      arrow.href = '/w/' + ws.id + '/';
+      arrow.href = href;
       arrow.className = 'ws-arrow';
       arrow.style.cssText = 'text-decoration:none';
       arrow.innerHTML = '&rarr;';
@@ -173,7 +186,7 @@ async function createWorkspace() {
     const tokens = _getTokens();
     tokens[data.id] = data.token;
     _saveTokens(tokens);
-    window.location.href = data.url;
+    window.location.href = '/w/' + data.id + '/#t=' + encodeURIComponent(data.token);
   } catch(e) {
     alert('สร้าง workspace ไม่สำเร็จ');
     btn.disabled = false;

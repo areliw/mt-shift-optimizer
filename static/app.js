@@ -3,6 +3,22 @@ const _pathParts = window.location.pathname.split('/');
 const WORKSPACE_ID = (_pathParts[1] === 'w' && _pathParts[2]) ? _pathParts[2] : '';
 const API = WORKSPACE_ID ? "/w/" + WORKSPACE_ID + "/api" : "/api";
 
+// ถ้า URL hash มี #t=TOKEN → บันทึก token ลง localStorage แล้วลบออกจาก URL
+(function() {
+  if (!WORKSPACE_ID) return;
+  const hash = window.location.hash;
+  const m = hash.match(/[#&]t=([0-9a-f]+)/i);
+  if (m) {
+    try {
+      const tokens = JSON.parse(localStorage.getItem('ws_tokens') || '{}');
+      tokens[WORKSPACE_ID] = m[1];
+      localStorage.setItem('ws_tokens', JSON.stringify(tokens));
+    } catch {}
+    // ลบ hash ออกจาก URL โดยไม่ reload
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+})();
+
 // Inject X-Workspace-Token on every request to this workspace
 (function() {
   const _WS_PREFIX = WORKSPACE_ID ? '/w/' + WORKSPACE_ID + '/' : null;

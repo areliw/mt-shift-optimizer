@@ -145,9 +145,15 @@ def get_workspace(wid: str):
     return {"id": row[0], "name": row[1], "created_at": row[2]}
 
 
-def list_workspaces():
-    """คืนรายการ workspace ทั้งหมด"""
+def list_workspaces(include_tokens: bool = False):
+    """คืนรายการ workspace ทั้งหมด (include_tokens=True เพื่อ dev mode sync)"""
     conn = _get_master_connection()
+    if include_tokens:
+        rows = conn.execute(
+            "SELECT id, name, created_at, access_token FROM workspace ORDER BY created_at DESC"
+        ).fetchall()
+        conn.close()
+        return [{"id": r[0], "name": r[1], "created_at": r[2], "token": r[3]} for r in rows]
     rows = conn.execute(
         "SELECT id, name, created_at FROM workspace ORDER BY created_at DESC"
     ).fetchall()
