@@ -1,11 +1,22 @@
 # database.py — แยกข้อมูล staff / กะ / settings ไว้ใน SQLite
 
 import json
+import os
 import re
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent / "shift_optimizer.db"
+# ให้แต่ละเครื่อง (แต่ละ deploy) ใช้ DB คนละไฟล์ได้
+# - DATABASE_PATH = path เต็ม (เช่น /data/optimizer.db) ใช้ไฟล์นี้เลย
+# - INSTANCE_ID = สตริง (เช่น staging, หน่วยงานA) ใช้ shift_optimizer_{INSTANCE_ID}.db
+# - ไม่ตั้งอะไร = shift_optimizer.db เหมือนเดิม
+_base = Path(__file__).resolve().parent
+if os.environ.get("DATABASE_PATH"):
+    DB_PATH = Path(os.environ["DATABASE_PATH"])
+elif os.environ.get("INSTANCE_ID"):
+    DB_PATH = _base / f"shift_optimizer_{os.environ['INSTANCE_ID'].strip()}.db"
+else:
+    DB_PATH = _base / "shift_optimizer.db"
 ROOMS = ("donor", "xmatch")
 
 

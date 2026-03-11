@@ -114,6 +114,10 @@ python main.py
 
 **หมายเหตุ:** ข้อมูลเก็บใน SQLite บนเครื่องของ Railway — ถ้า redeploy หรือ restart ข้อมูลอาจหาย ถ้าต้องการเก็บถาวรให้เพิ่ม Volume ใน Railway หรือเปลี่ยนไปใช้ DB ภายนอก
 
+**ให้แต่ละ deploy/เครื่องใช้ตารางคนละชุด:** ตั้งตัวแปรสภาพแวดล้อมใน Railway (Variables) อย่างใดอย่างหนึ่ง  
+- **`INSTANCE_ID`** — ใส่ค่าคนละอย่างในแต่ละ service (เช่น `หน่วยงานA`, `staging`, `site2`) ระบบจะใช้ไฟล์ DB แยกกัน เช่น `shift_optimizer_หน่วยงานA.db`  
+- **`DATABASE_PATH`** — ใส่ path เต็มของไฟล์ DB (เช่น `/data/optimizer.db`) ถ้าต้องการกำหนด path เอง
+
 ## วิธีใช้
 
 1. **ตั้งค่า** — กำหนดจำนวนวัน (num_days) แล้วกดบันทึก
@@ -129,7 +133,7 @@ python main.py
 - `scheduler.py` — OR-Tools CP-SAT จัดตาราง
 - `config.py` — ข้อมูลเริ่มต้น (ใช้ seed เข้า DB ครั้งแรก)
 - `static/` — หน้าเว็บ (index.html, style.css, app.js)
-- `shift_optimizer.db` — ฐานข้อมูล (สร้างอัตโนมัติเมื่อรัน)
+- `shift_optimizer.db` (หรือตาม INSTANCE_ID/DATABASE_PATH) — ฐานข้อมูล (สร้างอัตโนมัติเมื่อรัน)
 
 ## API (สรุป)
 
