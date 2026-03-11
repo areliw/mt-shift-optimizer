@@ -1,14 +1,29 @@
 # main.py — FastAPI entry for MT Shift Optimizer
 
+import collections
 import io
 import csv
+import logging
+import os
+import re as _re
 import sqlite3
+import time
 from pathlib import Path
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Query, APIRouter
-from fastapi.responses import HTMLResponse, FileResponse, Response
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, APIRouter, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger("mt_shift_optimizer")
 
 from database import (
     init_master_db,
@@ -67,6 +82,91 @@ init_master_db()
 
 app = FastAPI(title="MT Shift Optimizer")
 
+# ---------------------------------------------------------------------------
+# CORS — configure allowed origins via ALLOWED_ORIGINS env var
+# (comma-separated, e.g. "https://app.example.com,https://admin.example.com")
+# Defaults to "*" in dev; set a restrictive list in production.
+# ---------------------------------------------------------------------------
+_raw_origins = os.environ.get("ALLOWED_ORIGINS", "").strip()
+_ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()] or ["*"]
+if "*" in _ALLOWED_ORIGINS:
+    logger.warning("CORS is open to all origins. Set ALLOWED_ORIGINS env var in production.")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------------------------------------------------------------------
+# Rate limiting — simple in-memory sliding-window per client IP
+# ---------------------------------------------------------------------------
+_RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))   # seconds
+_RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "120"))         # requests / window
+_rate_counters: dict[str, list[float]] = collections.defaultdict(list)
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    client_ip = (request.client.host if request.client else "unknown")
+    now = time.monotonic()
+    window_start = now - _RATE_LIMIT_WINDOW
+    timestamps = _rate_counters[client_ip]
+    # evict stale entries
+    while timestamps and timestamps[0] < window_start:
+        timestamps.pop(0)
+    if len(timestamps) >= _RATE_LIMIT_MAX:
+        logger.warning("Rate limit exceeded for %s", client_ip)
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded. Please slow down."},
+        )
+    timestamps.append(now)
+    return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
+# API Key authentication
+# Set API_KEY env var to enable.  All /api/* and /w/* routes require the key.
+# If API_KEY is unset the server runs in open dev mode (warned at startup).
+# Clients must send:  X-API-Key: <key>
+# ---------------------------------------------------------------------------
+_API_KEY = os.environ.get("API_KEY", "").strip()
+if not _API_KEY:
+    logger.warning(
+        "API_KEY env var is not set — all endpoints are publicly accessible. "
+        "Set API_KEY before deploying to production."
+    )
+
+
+async def verify_api_key(x_api_key: str | None = Header(default=None)):
+    """FastAPI dependency: validate X-API-Key header when API_KEY is configured."""
+    if not _API_KEY:
+        return  # dev mode — skip auth
+    if not x_api_key or x_api_key != _API_KEY:
+        logger.warning("Rejected request: invalid or missing X-API-Key")
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+# ---------------------------------------------------------------------------
+# Input validation helpers
+# ---------------------------------------------------------------------------
+_HTML_CHARS_RE = _re.compile(r"[<>]")
+_MAX_NAME_LEN = 100
+
+
+def _validate_display_name(value: str, field: str = "name") -> str:
+    """Strip whitespace, reject HTML chars, enforce length limit."""
+    v = (value or "").strip()
+    if not v:
+        raise ValueError(f"{field} ต้องไม่ว่าง")
+    if len(v) > _MAX_NAME_LEN:
+        raise ValueError(f"{field} ยาวเกินไป (สูงสุด {_MAX_NAME_LEN} ตัวอักษร)")
+    if _HTML_CHARS_RE.search(v):
+        raise ValueError(f"{field} ต้องไม่มีอักขระ < หรือ >")
+    return v
+
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 if STATIC_DIR.exists():
@@ -97,6 +197,21 @@ class StaffCreate(BaseModel):
     min_gap_shifts: list[str] = []
     min_gap_rules: list[dict] = []
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_display_name(v, "ชื่อบุคลากร")
+
+    @field_validator("off_days", mode="before")
+    @classmethod
+    def validate_off_days(cls, v: list) -> list:
+        return [int(d) for d in v if 0 <= int(d) <= 6]
+
+    @field_validator("off_days_of_month", mode="before")
+    @classmethod
+    def validate_off_days_of_month(cls, v: list) -> list:
+        return [int(d) for d in v if 1 <= int(d) <= 31]
+
 
 class StaffUpdate(BaseModel):
     name: str
@@ -112,6 +227,21 @@ class StaffUpdate(BaseModel):
     min_gap_shifts: list[str] = []
     min_gap_rules: list[dict] = []
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_display_name(v, "ชื่อบุคลากร")
+
+    @field_validator("off_days", mode="before")
+    @classmethod
+    def validate_off_days(cls, v: list) -> list:
+        return [int(d) for d in v if 0 <= int(d) <= 6]
+
+    @field_validator("off_days_of_month", mode="before")
+    @classmethod
+    def validate_off_days_of_month(cls, v: list) -> list:
+        return [int(d) for d in v if 1 <= int(d) <= 31]
+
 
 class PositionItem(BaseModel):
     name: str
@@ -125,20 +255,40 @@ class PositionItem(BaseModel):
     max_per_week: int = 0  # สูงสุดกี่ครั้ง/สัปดาห์ (0 = ไม่จำกัด)
     active_weekdays: str | None = None  # เปิดเฉพาะวัน (0=จ … 6=อา) เช่น "6" = อาทิตย์เท่านั้น ว่าง = ทุกวันที่กะเปิด
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_display_name(v, "ชื่อตำแหน่ง")
+
 
 class TimeWindowCreate(BaseModel):
     name: str  # เช่น 06:30-12:00 (หรือให้ระบบสร้างจาก start_time-end_time)
     start_time: str = ""  # HH:MM
     end_time: str = ""    # HH:MM
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_display_name(v, "ชื่อช่วงเวลา")
+
 
 class SkillCreate(BaseModel):
     name: str
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_display_name(v, "ชื่อทักษะ")
 
 
 class TitleCreate(BaseModel):
     name: str
     type: str = "fulltime"  # fulltime | parttime
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_display_name(v, "ชื่อฉายา")
 
 
 class ShiftCreate(BaseModel):
@@ -150,6 +300,11 @@ class ShiftCreate(BaseModel):
     include_holidays: bool = False
     min_fulltime: int = 0
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_display_name(v, "ชื่อกะ")
+
 
 class ShiftUpdate(BaseModel):
     name: str
@@ -159,6 +314,11 @@ class ShiftUpdate(BaseModel):
     active_days: str | None = None
     include_holidays: bool = False
     min_fulltime: int = 0
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_display_name(v, "ชื่อกะ")
 
 
 class NumDaysUpdate(BaseModel):
@@ -203,11 +363,21 @@ class SlotAssign(BaseModel):
 class WorkspaceCreate(BaseModel):
     name: str = ""
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v and len(v) > _MAX_NAME_LEN:
+            raise ValueError(f"ชื่อ workspace ยาวเกินไป (สูงสุด {_MAX_NAME_LEN} ตัวอักษร)")
+        if _HTML_CHARS_RE.search(v):
+            raise ValueError("ชื่อต้องไม่มีอักขระ < หรือ >")
+        return v
+
 
 # ==========================================
 # Workspace-scoped router: /w/{workspace_id}/api/...
 # ==========================================
-ws_router = APIRouter(dependencies=[Depends(workspace_dep)])
+ws_router = APIRouter(dependencies=[Depends(workspace_dep), Depends(verify_api_key)])
 
 
 # --- API: Staff ---
@@ -518,11 +688,14 @@ def api_run_schedule(
     if not shift_list:
         raise HTTPException(status_code=400, detail="No shifts. Add at least one shift.")
     start_date_str = get_schedule_start_date()
+    logger.info("Running schedule: num_days=%d start_date=%s staff=%d shifts=%d",
+                num_days, start_date_str, len(mt_list), len(shift_list))
     slots, solver, status = generate_schedule(num_days=num_days, start_date_str=start_date_str or None)
 
     # กรณี solver fail จริงๆ (MODEL_INVALID ฯลฯ) — ไม่ใช่แค่ infeasible
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         reasons = diagnose_infeasible(mt_list, shift_list, num_days, start_date_str)
+        logger.warning("Schedule infeasible: %s", reasons)
         raise HTTPException(
             status_code=422,
             detail={"message": "Solver could not find any solution.", "reasons": reasons},
@@ -537,12 +710,14 @@ def api_run_schedule(
     result = {"run_id": run_id, "schedule": data}
     if dummy_slots:
         hints = diagnose_infeasible(mt_list, shift_list, num_days, start_date_str)
+        logger.warning("Schedule has %d dummy slots. Hints: %s", len(dummy_slots), hints)
         result["has_dummy"] = True
         result["dummy_count"] = len(dummy_slots)
         result["infeasibility_hints"] = hints
     else:
         result["has_dummy"] = False
         result["dummy_count"] = 0
+    logger.info("Schedule run_id=%d saved (slots=%d dummy=%d)", run_id, len(slots), len(dummy_slots))
     return result
 
 
@@ -722,22 +897,24 @@ app.include_router(ws_router, prefix="/w/{workspace_id}")
 # ==========================================
 
 # --- Workspace management API ---
-@app.post("/api/workspaces")
+@app.post("/api/workspaces", dependencies=[Depends(verify_api_key)])
 def api_create_workspace(body: WorkspaceCreate = Body(WorkspaceCreate())):
     wid = create_workspace(body.name)
+    logger.info("Created workspace id=%s name=%r", wid, body.name)
     return {"id": wid, "url": f"/w/{wid}/"}
 
 
-@app.get("/api/workspaces")
+@app.get("/api/workspaces", dependencies=[Depends(verify_api_key)])
 def api_list_workspaces():
     return list_workspaces()
 
 
-@app.delete("/api/workspaces/{workspace_id}")
+@app.delete("/api/workspaces/{workspace_id}", dependencies=[Depends(verify_api_key)])
 def api_delete_workspace(workspace_id: str):
     ok = delete_workspace(workspace_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Workspace not found")
+    logger.info("Deleted workspace id=%s", workspace_id)
     return {"ok": True}
 
 

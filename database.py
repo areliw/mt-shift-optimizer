@@ -271,6 +271,11 @@ def init_db(conn=None):
                 can_evening INTEGER NOT NULL DEFAULT 0,
                 can_friday INTEGER NOT NULL DEFAULT 0
             );
+            -- Indexes for performance
+            CREATE INDEX IF NOT EXISTS idx_schedule_slot_run_id ON schedule_slot(run_id);
+            CREATE INDEX IF NOT EXISTS idx_schedule_slot_staff_name ON schedule_slot(staff_name);
+            CREATE INDEX IF NOT EXISTS idx_shift_position_shift_id ON shift_position(shift_id);
+            CREATE INDEX IF NOT EXISTS idx_staff_skill_skill ON staff_skill(skill);
         """)
         conn.commit()
         try:
@@ -404,6 +409,8 @@ def _migrate_staff_pair(conn):
             )
         """)
         conn.commit()
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_staff_pair_ids ON staff_pair(staff_id_1, staff_id_2)")
+    conn.commit()
 
 
 def _migrate_staff_pair_shift_names(conn):
