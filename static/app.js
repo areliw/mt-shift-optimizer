@@ -732,7 +732,7 @@ function renderSchedule(data, staffList) {
     if (!shiftPositions[sn]) shiftPositions[sn] = [];
     if (!shiftPositions[sn].includes(pos)) shiftPositions[sn].push(pos);
   });
-  Object.keys(shiftPositions).forEach((sn) => shiftPositions[sn].sort());
+  // positions already in definition order from API (sort_order)
 
   // --- Group/sort shifts by "room" suffix for readability (Template 5) ---
   function parseRoomAndKind(shiftName) {

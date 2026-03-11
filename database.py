@@ -1744,7 +1744,11 @@ def get_latest_schedule(conn=None):
         run_id, created_at, num_days = row[0], row[1], row[2]
         start_date = row[3] if len(row) > 3 else None
         rows = conn.execute(
-            "SELECT staff_name, day, shift_name, position, slot_index, time_window FROM schedule_slot WHERE run_id = ? ORDER BY day, shift_name, position, slot_index",
+            "SELECT ss.staff_name, ss.day, ss.shift_name, ss.position, ss.slot_index, ss.time_window "
+            "FROM schedule_slot ss "
+            "LEFT JOIN shift s ON s.name = ss.shift_name "
+            "LEFT JOIN shift_position sp ON sp.shift_id = s.id AND sp.name = ss.position "
+            "WHERE ss.run_id = ? ORDER BY ss.day, ss.shift_name, COALESCE(sp.sort_order, 9999), ss.position, ss.slot_index",
             (run_id,),
         ).fetchall()
         slots = [_build_slot(r) for r in rows]
@@ -1768,7 +1772,11 @@ def get_schedule(run_id, conn=None):
         rid, created_at, num_days = row[0], row[1], row[2]
         start_date = row[3] if len(row) > 3 else None
         rows = conn.execute(
-            "SELECT staff_name, day, shift_name, position, slot_index, time_window FROM schedule_slot WHERE run_id = ? ORDER BY day, shift_name, position, slot_index",
+            "SELECT ss.staff_name, ss.day, ss.shift_name, ss.position, ss.slot_index, ss.time_window "
+            "FROM schedule_slot ss "
+            "LEFT JOIN shift s ON s.name = ss.shift_name "
+            "LEFT JOIN shift_position sp ON sp.shift_id = s.id AND sp.name = ss.position "
+            "WHERE ss.run_id = ? ORDER BY ss.day, ss.shift_name, COALESCE(sp.sort_order, 9999), ss.position, ss.slot_index",
             (rid,),
         ).fetchall()
         slots = [_build_slot(r) for r in rows]
