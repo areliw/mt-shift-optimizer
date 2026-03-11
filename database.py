@@ -32,6 +32,12 @@ _workspace_db_path: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 )
 
 
+def _validate_workspace_id(wid: str):
+    """ตรวจ workspace ID: ต้องเป็น hex 8 ตัวเท่านั้น (ป้องกัน path traversal)"""
+    if not isinstance(wid, str) or not re.match(r'^[0-9a-f]{8}$', wid):
+        raise ValueError("Invalid workspace ID")
+
+
 def _get_master_connection():
     return sqlite3.connect(str(MASTER_DB_PATH))
 
@@ -91,6 +97,10 @@ def create_workspace(name: str = "") -> str:
 
 def get_workspace(wid: str):
     """คืน workspace dict หรือ None"""
+    try:
+        _validate_workspace_id(wid)
+    except ValueError:
+        return None
     conn = _get_master_connection()
     row = conn.execute(
         "SELECT id, name, created_at FROM workspace WHERE id = ?", (wid,)
@@ -113,6 +123,7 @@ def list_workspaces():
 
 def delete_workspace(wid: str) -> bool:
     """ลบ workspace: ลบ record จาก master DB + ลบไฟล์ DB"""
+    _validate_workspace_id(wid)
     conn = _get_master_connection()
     row = conn.execute("SELECT 1 FROM workspace WHERE id = ?", (wid,)).fetchone()
     if not row:
@@ -129,6 +140,7 @@ def delete_workspace(wid: str) -> bool:
 
 def set_workspace_context(wid: str):
     """ตั้ง workspace DB path ใน contextvar (ต้องเรียกจาก async context เพื่อ propagate ไปยัง sync threads)"""
+    _validate_workspace_id(wid)
     _workspace_db_path.set(str(WORKSPACES_DIR / f"{wid}.db"))
 
 
