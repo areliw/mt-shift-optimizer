@@ -188,7 +188,10 @@ def init_db(conn=None):
         _migrate_staff_min_gap_rules(conn)
         _migrate_shift_include_holidays(conn)
         _migrate_staff_pair(conn)
+        _migrate_staff_pair_shift_names(conn)
         _migrate_shift_position_active_weekdays(conn)
+        _migrate_shift_position_min_fulltime(conn)
+        _migrate_shift_min_fulltime(conn)
     finally:
         if close:
             conn.close()
@@ -276,6 +279,18 @@ def _migrate_staff_pair(conn):
         conn.commit()
 
 
+def _migrate_staff_pair_shift_names(conn):
+    """เพิ่ม shift_names (JSON array) สำหรับจำกัด pair เฉพาะบางกะ เช่น เวรดึกเท่านั้น"""
+    try:
+        info = conn.execute("PRAGMA table_info(staff_pair)").fetchall()
+        if any(c[1] == "shift_names" for c in info):
+            return
+        conn.execute("ALTER TABLE staff_pair ADD COLUMN shift_names TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _migrate_skill_catalog_and_staff_skill(conn):
     """สร้าง skill_catalog และให้ staff_skill รับ skill อะไรก็ได้ (ไม่จำกัด donor,xmatch)"""
     conn.execute("CREATE TABLE IF NOT EXISTS skill_catalog (name TEXT PRIMARY KEY)")
@@ -341,6 +356,30 @@ def _migrate_shift_position_allowed_titles(conn):
     """เพิ่ม allowed_titles (JSON text) ให้ shift_position — ระบุฉายาที่อนุญาตให้อยู่ช่องนี้ได้"""
     try:
         conn.execute("ALTER TABLE shift_position ADD COLUMN allowed_titles TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _migrate_shift_position_min_fulltime(conn):
+    """legacy: min_fulltime เคยอยู่ที่ position ตอนนี้ย้ายไป shift แล้ว"""
+    try:
+        info = conn.execute("PRAGMA table_info(shift_position)").fetchall()
+        if any(c[1] == "min_fulltime" for c in info):
+            return
+        conn.execute("ALTER TABLE shift_position ADD COLUMN min_fulltime INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _migrate_shift_min_fulltime(conn):
+    """เจ้าหน้าที่ประจำขั้นต่ำ: จำนวนเต็มเวลาขั้นต่ำต่อกะ (รวมทุกช่อง) 0 = ยืดหยุ่น"""
+    try:
+        info = conn.execute("PRAGMA table_info(shift)").fetchall()
+        if any(c[1] == "min_fulltime" for c in info):
+            return
+        conn.execute("ALTER TABLE shift ADD COLUMN min_fulltime INTEGER NOT NULL DEFAULT 0")
         conn.commit()
     except sqlite3.OperationalError:
         pass
@@ -1028,12 +1067,13 @@ def list_shifts(conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        rows = conn.execute("SELECT id, name, donor, xmatch, active_days, COALESCE(include_holidays,0) FROM shift ORDER BY id").fetchall()
+        rows = conn.execute("SELECT id, name, donor, xmatch, active_days, COALESCE(include_holidays,0), COALESCE(min_fulltime,0) FROM shift ORDER BY id").fetchall()
         result = []
         for r in rows:
             sid, name, donor, xmatch = r[0], r[1], r[2], r[3]
             active_days = r[4] if len(r) > 4 else None
             include_holidays = bool(r[5]) if len(r) > 5 else False
+            min_fulltime = int(r[6] or 0) if len(r) > 6 else 0
             pos_rows = conn.execute(
                 """
                 SELECT
@@ -1084,7 +1124,7 @@ def list_shifts(conn=None):
                             "active_weekdays": aw_p or None,
                         }
                     )
-                result.append({"id": sid, "name": name, "positions": positions, "active_days": active_days, "include_holidays": include_holidays})
+                result.append({"id": sid, "name": name, "positions": positions, "active_days": active_days, "include_holidays": include_holidays, "min_fulltime": min_fulltime})
             else:
                 result.append({
                     "id": sid,
@@ -1095,6 +1135,7 @@ def list_shifts(conn=None):
                     + [{"name": "Xmatch", "constraint_note": "", "regular_only": False}] * xmatch,
                     "active_days": active_days,
                     "include_holidays": include_holidays,
+                    "min_fulltime": min_fulltime,
                 })
         return result
     finally:
@@ -1120,11 +1161,12 @@ def _insert_position(conn, shift_id, index, p):
     )
 
 
-def create_shift(name, donor=1, xmatch=1, positions=None, active_days=None, include_holidays=False, conn=None):
+def create_shift(name, donor=1, xmatch=1, positions=None, active_days=None, include_holidays=False, min_fulltime=0, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        cur = conn.execute("INSERT INTO shift (name, donor, xmatch, active_days, include_holidays) VALUES (?, ?, ?, ?, ?)", (name, donor, xmatch, active_days or None, 1 if include_holidays else 0))
+        min_ft = max(0, int(min_fulltime or 0))
+        cur = conn.execute("INSERT INTO shift (name, donor, xmatch, active_days, include_holidays, min_fulltime) VALUES (?, ?, ?, ?, ?, ?)", (name, donor, xmatch, active_days or None, 1 if include_holidays else 0, min_ft))
         sid = cur.lastrowid
         if positions:
             for i, p in enumerate(positions):
@@ -1136,11 +1178,12 @@ def create_shift(name, donor=1, xmatch=1, positions=None, active_days=None, incl
             conn.close()
 
 
-def update_shift(sid, name, donor=1, xmatch=1, positions=None, active_days=None, include_holidays=False, conn=None):
+def update_shift(sid, name, donor=1, xmatch=1, positions=None, active_days=None, include_holidays=False, min_fulltime=0, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        conn.execute("UPDATE shift SET name = ?, donor = ?, xmatch = ?, active_days = ?, include_holidays = ? WHERE id = ?", (name, donor, xmatch, active_days or None, 1 if include_holidays else 0, sid))
+        min_ft = max(0, int(min_fulltime or 0))
+        conn.execute("UPDATE shift SET name = ?, donor = ?, xmatch = ?, active_days = ?, include_holidays = ?, min_fulltime = ? WHERE id = ?", (name, donor, xmatch, active_days or None, 1 if include_holidays else 0, min_ft, sid))
         conn.execute("DELETE FROM shift_position WHERE shift_id = ?", (sid,))
         if positions:
             for i, p in enumerate(positions):
@@ -1346,12 +1389,13 @@ def get_shift_list(conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        rows = conn.execute("SELECT id, name, donor, xmatch, active_days, COALESCE(include_holidays,0) FROM shift ORDER BY id").fetchall()
+        rows = conn.execute("SELECT id, name, donor, xmatch, active_days, COALESCE(include_holidays,0), COALESCE(min_fulltime,0) FROM shift ORDER BY id").fetchall()
         result = []
         for r in rows:
             sid, name, donor, xmatch = r[0], r[1], r[2], r[3]
             active_days = r[4] if len(r) > 4 else None
             include_holidays = bool(r[5]) if len(r) > 5 else False
+            min_fulltime = int(r[6] or 0) if len(r) > 6 else 0
             pos_rows = conn.execute(
                 "SELECT name, regular_only, COALESCE(slot_count, 1), time_window_name, COALESCE(required_skill,''), COALESCE(min_skill_level,0), COALESCE(allowed_titles,'[]'), COALESCE(max_per_week,0), active_weekdays FROM shift_position WHERE shift_id = ? ORDER BY sort_order",
                 (sid,),
@@ -1361,6 +1405,7 @@ def get_shift_list(conn=None):
                     "name": name,
                     "active_days": active_days,
                     "include_holidays": include_holidays,
+                    "min_fulltime": min_fulltime,
                     "positions": [{"name": p[0], "regular_only": bool(p[1]), "slot_count": int(p[2]), "time_window_name": (p[3] if len(p) > 3 and p[3] else None) or "", "required_skill": p[4] or "", "min_skill_level": int(p[5] or 0), "allowed_titles": json.loads(p[6] or "[]"), "max_per_week": int(p[7] or 0), "active_weekdays": (p[8] if len(p) > 8 and p[8] else None) or None} for p in pos_rows],
                 })
             else:
@@ -1368,6 +1413,7 @@ def get_shift_list(conn=None):
                     "name": name,
                     "active_days": active_days,
                     "include_holidays": include_holidays,
+                    "min_fulltime": min_fulltime,
                     "donor": donor,
                     "xmatch": xmatch,
                     "positions": [{"name": "Donor", "regular_only": False}] * donor + [{"name": "Xmatch", "regular_only": False}] * xmatch,
@@ -1558,11 +1604,46 @@ def get_schedule(run_id, conn=None):
             conn.close()
 
 
+def _get_position_skill_requirement(conn, shift_name, position):
+    """คืน (required_skill, min_skill_level) สำหรับตำแหน่งนี้ ถ้าไม่มี requirement คืน ('', 0)"""
+    row = conn.execute(
+        """
+        SELECT COALESCE(sp.required_skill, ''), COALESCE(sp.min_skill_level, 0)
+        FROM shift_position sp
+        JOIN shift s ON s.id = sp.shift_id
+        WHERE s.name = ? AND sp.name = ?
+        """,
+        (shift_name, position),
+    ).fetchone()
+    if not row:
+        return "", 0
+    return (row[0] or "").strip(), int(row[1] or 0)
+
+
 def update_slot_staff(run_id, day, shift_name, position, slot_index, new_staff_name, conn=None):
     """Manual override: เปลี่ยนชื่อ staff ใน slot ที่ระบุ (เช่น แทนที่ _DUMMY_ ด้วยคนจริง)"""
     close = conn is None
     conn = conn or get_connection()
     try:
+        # Guard: เช็ค skill ว่าคนที่ยัดลงมีทักษะตรงตำแหน่งหรือไม่
+        req_skill, min_level = _get_position_skill_requirement(conn, shift_name, position)
+        if req_skill:
+            staff_row = conn.execute("SELECT id FROM staff WHERE name = ?", (new_staff_name,)).fetchone()
+            if not staff_row:
+                raise ValueError(f"ไม่พบบุคลากร '{new_staff_name}' ในระบบ")
+            staff_id = staff_row[0]
+            skill_row = conn.execute(
+                "SELECT COALESCE(level, 1) FROM staff_skill WHERE staff_id = ? AND skill = ?",
+                (staff_id, req_skill),
+            ).fetchone()
+            if not skill_row:
+                raise ValueError(f"'{new_staff_name}' ไม่มีทักษะ '{req_skill}' ที่ตำแหน่งนี้ต้องการ — ลงไม่ได้")
+            lvl = int(skill_row[0] or 1)
+            if lvl < min_level:
+                raise ValueError(
+                    f"'{new_staff_name}' มีทักษะ '{req_skill}' ระดับ {lvl} ต่ำกว่าที่ตำแหน่งต้องการ (≥{min_level}) — ลงไม่ได้"
+                )
+
         # Guard: ห้ามคนเดียวกันมีเวรมากกว่า 1 ช่องในวันเดียวกัน (กัน "แยกร่าง")
         existing = conn.execute(
             """
@@ -1737,23 +1818,43 @@ def list_staff_pairs(conn=None):
     conn = conn or get_connection()
     try:
         rows = conn.execute("""
-            SELECT sp.id, sp.staff_id_1, s1.name, sp.staff_id_2, s2.name, sp.pair_type
+            SELECT sp.id, sp.staff_id_1, s1.name, sp.staff_id_2, s2.name, sp.pair_type,
+                   COALESCE(sp.shift_names, '[]')
             FROM staff_pair sp
             JOIN staff s1 ON sp.staff_id_1 = s1.id
             JOIN staff s2 ON sp.staff_id_2 = s2.id
             ORDER BY sp.id
         """).fetchall()
-        return [{"id": r[0], "staff_id_1": r[1], "name_1": r[2], "staff_id_2": r[3], "name_2": r[4], "pair_type": r[5]} for r in rows]
+        result = []
+        for r in rows:
+            item = {"id": r[0], "staff_id_1": r[1], "name_1": r[2], "staff_id_2": r[3], "name_2": r[4], "pair_type": r[5]}
+            try:
+                item["shift_names"] = json.loads(r[6]) if r[6] else []
+            except Exception:
+                item["shift_names"] = []
+            if not isinstance(item["shift_names"], list):
+                item["shift_names"] = []
+            result.append(item)
+        return result
     finally:
         if close:
             conn.close()
 
 
-def add_staff_pair(staff_id_1, staff_id_2, pair_type, conn=None):
+def add_staff_pair(staff_id_1, staff_id_2, pair_type, shift_names=None, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        conn.execute("INSERT INTO staff_pair (staff_id_1, staff_id_2, pair_type) VALUES (?, ?, ?)", (staff_id_1, staff_id_2, pair_type))
+        shift_names = shift_names or []
+        if not isinstance(shift_names, list):
+            shift_names = [s for s in (shift_names or "").split(",") if str(s).strip()]
+        else:
+            shift_names = [str(s).strip() for s in shift_names if str(s).strip()]
+        shift_json = json.dumps(shift_names, ensure_ascii=False) if shift_names else "[]"
+        conn.execute(
+            "INSERT INTO staff_pair (staff_id_1, staff_id_2, pair_type, shift_names) VALUES (?, ?, ?, ?)",
+            (staff_id_1, staff_id_2, pair_type, shift_json),
+        )
         conn.commit()
     finally:
         if close:
@@ -1842,13 +1943,18 @@ def import_all_data(data, conn=None):
                 positions=sh.get("positions"),
                 active_days=sh.get("active_days"),
                 include_holidays=sh.get("include_holidays", False),
+                min_fulltime=sh.get("min_fulltime", 0),
                 conn=conn,
             )
         for p in (data.get("pairs") or []):
             s1 = conn.execute("SELECT id FROM staff WHERE name = ?", (p.get("name_1", ""),)).fetchone()
             s2 = conn.execute("SELECT id FROM staff WHERE name = ?", (p.get("name_2", ""),)).fetchone()
             if s1 and s2:
-                add_staff_pair(s1[0], s2[0], p.get("pair_type", "together"), conn=conn)
+                add_staff_pair(
+                    s1[0], s2[0], p.get("pair_type", "together"),
+                    shift_names=p.get("shift_names"),
+                    conn=conn,
+                )
         conn.commit()
     finally:
         if close:

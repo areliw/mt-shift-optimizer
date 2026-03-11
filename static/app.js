@@ -543,6 +543,10 @@ function hasShiftFormUnsavedChanges() {
   const nameInput = document.getElementById("shift_name");
   const currentName = (nameInput && nameInput.value || "").trim();
   if (currentName !== (shift.name || "").trim()) return true;
+  const mfEl = document.getElementById("shift_min_fulltime");
+  const currentMf = mfEl ? parseInt(mfEl.value, 10) || 0 : 0;
+  const savedMf = parseInt(shift.min_fulltime, 10) || 0;
+  if (currentMf !== savedMf) return true;
   const currentPositions = collectShiftPositions();
   const savedPositions = shift.positions || [];
   if (currentPositions.length !== savedPositions.length) return true;
@@ -567,6 +571,8 @@ function resetShiftForm() {
   if (adEl) adEl.value = "";
   const ihEl = document.getElementById("shift_include_holidays");
   if (ihEl) ihEl.checked = false;
+  const mfEl = document.getElementById("shift_min_fulltime");
+  if (mfEl) mfEl.value = "0";
   const list = document.getElementById("shift_positions_list");
   if (list) {
     list.innerHTML = "";
@@ -593,6 +599,8 @@ function startEditShift(shiftId) {
   if (adEl) adEl.value = shift.active_days || "";
   const ihEl = document.getElementById("shift_include_holidays");
   if (ihEl) ihEl.checked = !!shift.include_holidays;
+  const mfEl = document.getElementById("shift_min_fulltime");
+  if (mfEl) mfEl.value = String(Math.max(0, parseInt(shift.min_fulltime, 10) || 0));
   const list = document.getElementById("shift_positions_list");
   if (list) {
     list.innerHTML = "";
@@ -890,13 +898,32 @@ async function handleDummyClick(span, staffList, runId, busyByDay) {
   ph.value = "";
   ph.textContent = "— เลือกบุคลากร —";
   select.appendChild(ph);
+
+  const shift = (shiftsCache || []).find((s) => s.name === shiftName);
+  const posInfo = shift && shift.positions ? shift.positions.find((p) => p.name === position) : null;
+  const requiredSkill = posInfo && posInfo.required_skill ? (posInfo.required_skill || "").trim() : "";
+  const minSkillLevel = posInfo && posInfo.min_skill_level ? parseInt(posInfo.min_skill_level, 10) || 0 : 0;
+
+  const canWorkPosition = (mt) => {
+    if (!requiredSkill) return true;
+    const skills = mt.skills || [];
+    const levels = mt.skill_levels || {};
+    if (!skills.includes(requiredSkill)) return false;
+    const lvl = parseInt(levels[requiredSkill], 10) || 1;
+    return lvl >= minSkillLevel;
+  };
+
   const busy = busyByDay && busyByDay[day] ? busyByDay[day] : new Set();
   staffList.forEach((mt) => {
     const opt = document.createElement("option");
     opt.value = mt.name;
     const isBusy = busy.has(mt.name);
-    opt.textContent = isBusy ? `${mt.name} (มีเวรแล้ว)` : mt.name;
-    if (isBusy) opt.disabled = true;
+    const hasSkill = canWorkPosition(mt);
+    let label = mt.name;
+    if (isBusy) label += " (มีเวรแล้ว)";
+    else if (!hasSkill && requiredSkill) label += " (ไม่มีทักษะ)";
+    opt.textContent = label;
+    if (isBusy || (!hasSkill && requiredSkill)) opt.disabled = true;
     select.appendChild(opt);
   });
 
@@ -945,6 +972,7 @@ async function refreshShifts() {
   const list = await loadShifts();
   shiftsCache = Array.isArray(list) ? list : [];
   renderShiftList(list);
+  refreshPairShiftsSelect();
   const addGapRules = document.getElementById("staff_add_min_gap_rules");
   if (addGapRules) renderMinGapRulesInputs(addGapRules, []);
   lastCounts.shifts = list.length;
@@ -1733,6 +1761,8 @@ document.getElementById("add_shift").addEventListener("click", async () => {
   const active_days = (activeDaysEl && activeDaysEl.value.trim()) || null;
   const inclHolEl = document.getElementById("shift_include_holidays");
   const include_holidays = inclHolEl ? inclHolEl.checked : false;
+  const mfEl = document.getElementById("shift_min_fulltime");
+  const min_fulltime = mfEl ? Math.max(0, parseInt(mfEl.value, 10) || 0) : 0;
   const isEdit = currentShiftId != null;
   const url = isEdit ? API + "/shifts/" + currentShiftId : API + "/shifts";
   const method = isEdit ? "PUT" : "POST";
@@ -1740,7 +1770,7 @@ document.getElementById("add_shift").addEventListener("click", async () => {
     const r = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, positions, active_days, include_holidays }),
+      body: JSON.stringify({ name, positions, active_days, include_holidays, min_fulltime }),
     });
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
@@ -2107,6 +2137,26 @@ document.getElementById("import_json_file").addEventListener("change", async (e)
 });
 
 // --- Staff Pairs ---
+function refreshPairShiftsSelect() {
+  const wrap = document.getElementById("pair_shifts_checkboxes");
+  const filterOn = document.getElementById("pair_shift_filter_on");
+  if (!wrap || !filterOn) return;
+  const shifts = Array.isArray(shiftsCache) ? shiftsCache : [];
+  wrap.innerHTML = shifts.map((s) =>
+    `<label class="pair-shift-chip" style="display:inline-flex; align-items:center; gap:.25rem; padding:.25rem .5rem; background:var(--surface-2, #f8fafc); border:1px solid var(--border, #e2e8f0); border-radius:var(--radius-sm, 6px); cursor:pointer; font-size:.88rem; user-select:none">
+      <input type="checkbox" class="pair-shift-cb" value="${escapeHtml(s.name)}" />
+      <span>${escapeHtml(s.name)}</span>
+    </label>`
+  ).join("");
+}
+
+function getPairSelectedShifts() {
+  const filterOn = document.getElementById("pair_shift_filter_on");
+  if (!filterOn || !filterOn.checked) return [];
+  const cbs = document.querySelectorAll(".pair-shift-cb:checked");
+  return Array.from(cbs).map((el) => el.value).filter(Boolean);
+}
+
 async function refreshPairs() {
   try {
     const r = await fetch(API + "/staff-pairs");
@@ -2118,10 +2168,13 @@ async function refreshPairs() {
       if (p.pair_type === "together") { typeLabel = "อยู่ด้วยกัน"; cls = "pair-together"; arrow = "↔"; }
       else if (p.pair_type === "depends_on") { typeLabel = "ต้องอยู่กับ"; cls = "pair-depends"; arrow = "→"; }
       else { typeLabel = "ห้ามอยู่ด้วยกัน"; cls = "pair-apart"; arrow = "↔"; }
+      const shiftNote = (p.shift_names || []).length > 0
+        ? ` <span class="text-muted" style="font-size:.82rem">(เฉพาะ ${(p.shift_names || []).map((s) => escapeHtml(s)).join(", ")})</span>`
+        : "";
       const label = p.pair_type === "depends_on"
         ? `${escapeHtml(p.name_2)} ${arrow} ต้องอยู่กับ ${escapeHtml(p.name_1)}`
         : `${escapeHtml(p.name_1)} ${arrow} ${escapeHtml(p.name_2)} (${typeLabel})`;
-      return `<li class="skill-list-item"><span class="${cls}">${label}</span> <button type="button" class="small btn-delete-pair" data-id="${p.id}">ลบ</button></li>`;
+      return `<li class="skill-list-item"><span class="${cls}">${label}${shiftNote}</span> <button type="button" class="small btn-delete-pair" data-id="${p.id}">ลบ</button></li>`;
     }).join("");
     ul.querySelectorAll(".btn-delete-pair").forEach((btn) => {
       btn.addEventListener("click", async () => {
@@ -2130,7 +2183,6 @@ async function refreshPairs() {
       });
     });
   } catch {}
-  // also refresh pair dropdowns
   try {
     const staff = await loadStaff();
     const sel1 = document.getElementById("pair_staff_1");
@@ -2141,19 +2193,30 @@ async function refreshPairs() {
       sel2.innerHTML = opts;
     }
   } catch {}
+  refreshPairShiftsSelect();
+  const filterOn = document.getElementById("pair_shift_filter_on");
+  const wrap = document.getElementById("pair_shifts_checkboxes");
+  if (filterOn && wrap && !filterOn.dataset.bound) {
+    filterOn.dataset.bound = "1";
+    wrap.style.display = filterOn.checked ? "flex" : "none";
+    filterOn.onchange = () => { wrap.style.display = filterOn.checked ? "flex" : "none"; };
+  }
 }
 
 document.getElementById("add_pair").addEventListener("click", async () => {
   const s1 = document.getElementById("pair_staff_1").value;
   const s2 = document.getElementById("pair_staff_2").value;
   const pt = document.getElementById("pair_type").value;
+  const shiftNames = getPairSelectedShifts();
   if (!s1 || !s2) { alert("เลือกบุคลากรทั้ง 2 คน"); return; }
   if (s1 === s2) { alert("ต้องเลือกคนละคน"); return; }
   try {
+    const body = { staff_id_1: parseInt(s1, 10), staff_id_2: parseInt(s2, 10), pair_type: pt };
+    if (shiftNames.length > 0) body.shift_names = shiftNames;
     const r = await fetch(API + "/staff-pairs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ staff_id_1: parseInt(s1, 10), staff_id_2: parseInt(s2, 10), pair_type: pt }),
+      body: JSON.stringify(body),
     });
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));

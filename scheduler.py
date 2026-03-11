@@ -309,7 +309,7 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
                 break  # เจออย่างน้อย 1 คนพอ
 
     if not reasons:
-        reasons.append("ตัวแก้ไม่พบสาเหตุชัดเจน — ลองลดจำนวนวัน หรือตรวจวันหยุด/วันหยุดรายเดือน")
+        reasons.append("ตัวแก้ไม่พบสาเหตุชัดเจน — ลองลด min เวรของคนที่อยู่มากที่สุด 2–3 คน รวมลงมาประมาณ 5 เวร ให้ตารางออกก่อน แล้วค่อยปรับจูนทีหลัง")
     return reasons
 
 
@@ -424,6 +424,32 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
                 for day in range(num_days):
                     model.add(assign[(mt["name"], day, shift["name"], pos_name, slot_i)] == 0)
 
+    # แต่ละกะ: min_fulltime = เจ้าหน้าที่ประจำขั้นต่ำ (รวมทุกช่องในกะ) 0 = ยืดหยุ่น/pt ได้
+    fulltime_mt = [mt for mt in mt_list if mt.get("type") == "fulltime"]
+    if fulltime_mt:
+        shift_slots = {}  # shift_name -> [(shift, pos, pos_name, slot_i), ...]
+        for shift, pos, pos_name, slot_i in expanded:
+            shift_slots.setdefault(shift["name"], []).append((shift, pos, pos_name, slot_i))
+        for shift in shift_list:
+            sn = shift["name"]
+            min_ft = max(0, int(shift.get("min_fulltime", 0)))
+            if min_ft <= 0:
+                continue
+            slots = shift_slots.get(sn, [])
+            if not slots:
+                continue
+            for day in range(num_days):
+                if not any(_is_slot_active_on_day(s, p, day, start_date, holiday_set) for s, p, _, _ in slots):
+                    continue
+                model.add(
+                    sum(
+                        assign[(mt["name"], day, sn, pos_name, slot_i)]
+                        for mt in fulltime_mt
+                        for _, _, pos_name, slot_i in slots
+                    )
+                    >= min_ft
+                )
+
     for shift in shift_list:
         for pos in shift.get("positions", []):
             if not isinstance(pos, dict):
@@ -517,6 +543,7 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
             _apply_gap_rule(mt_name, g0, gap_shifts if gap_shifts else None)
 
     # --- Pair preferences ---
+    # shift_names: ว่าง/[] = ใช้ทุกกะ, มีค่า = ใช้เฉพาะกะนั้น
     # "apart": hard constraint — never same shift on same day
     # "together": soft — penalty when one works and the other doesn't on same day
     together_penalty_terms = []
@@ -524,26 +551,60 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
         n1, n2 = p["name_1"], p["name_2"]
         if n1 not in name_to_mt or n2 not in name_to_mt:
             continue
+        shift_filter = p.get("shift_names") or []
+        if not isinstance(shift_filter, list):
+            shift_filter = []
+        shift_filter = set(str(s).strip() for s in shift_filter if str(s).strip())
+
+        def _shift_applies(sn):
+            return not shift_filter or sn in shift_filter
+
         if p["pair_type"] == "apart":
             for day in range(num_days):
                 for shift, pos, pos_name, slot_i in expanded:
+                    if not _shift_applies(shift["name"]):
+                        continue
                     model.add(
                         assign[(n1, day, shift["name"], pos_name, slot_i)]
                         + assign[(n2, day, shift["name"], pos_name, slot_i)]
                         <= 1
                     )
         elif p["pair_type"] == "together":
-            for day in range(num_days):
-                if (n1, day) in has_work and (n2, day) in has_work:
-                    diff = model.new_bool_var(f"pair_diff_{n1}_{n2}_d{day}")
-                    model.add(has_work[(n1, day)] != has_work[(n2, day)]).only_enforce_if(diff)
-                    model.add(has_work[(n1, day)] == has_work[(n2, day)]).only_enforce_if(diff.negated())
-                    together_penalty_terms.append(diff)
+            # ถ้ามี shift_filter: penalty เมื่อหนึ่งคนทำงานกะนั้นวันนั้น แต่อีกคนไม่ทำ
+            if shift_filter:
+                for day in range(num_days):
+                    for shift in shift_list:
+                        sn = shift["name"]
+                        if not _shift_applies(sn):
+                            continue
+                        n1_in_shift = [assign[(n1, day, sn, pn, si)] for s, _, pn, si in expanded if s["name"] == sn]
+                        n2_in_shift = [assign[(n2, day, sn, pn, si)] for s, _, pn, si in expanded if s["name"] == sn]
+                        if not n1_in_shift or not n2_in_shift:
+                            continue
+                        n1_any = model.new_bool_var(f"n1_any_{n1}_{sn}_d{day}")
+                        n2_any = model.new_bool_var(f"n2_any_{n2}_{sn}_d{day}")
+                        model.add(sum(n1_in_shift) >= 1).only_enforce_if(n1_any)
+                        model.add(sum(n1_in_shift) == 0).only_enforce_if(n1_any.negated())
+                        model.add(sum(n2_in_shift) >= 1).only_enforce_if(n2_any)
+                        model.add(sum(n2_in_shift) == 0).only_enforce_if(n2_any.negated())
+                        diff = model.new_bool_var(f"pair_diff_{n1}_{n2}_d{day}_{sn}")
+                        model.add(diff >= n1_any - n2_any)
+                        model.add(diff >= n2_any - n1_any)
+                        together_penalty_terms.append(diff)
+            else:
+                for day in range(num_days):
+                    if (n1, day) in has_work and (n2, day) in has_work:
+                        diff = model.new_bool_var(f"pair_diff_{n1}_{n2}_d{day}")
+                        model.add(has_work[(n1, day)] != has_work[(n2, day)]).only_enforce_if(diff)
+                        model.add(has_work[(n1, day)] == has_work[(n2, day)]).only_enforce_if(diff.negated())
+                        together_penalty_terms.append(diff)
         elif p["pair_type"] == "depends_on":
             # n2 ทำงานได้เฉพาะเวรเดียวกับ n1 (ถ้า n2 อยู่เวร S วัน D → n1 ต้องอยู่เวร S วัน D ด้วย)
             for day in range(num_days):
                 for shift in shift_list:
                     sn = shift["name"]
+                    if not _shift_applies(sn):
+                        continue
                     n2_in_shift = [assign[(n2, day, sn, pn, si)] for s, _, pn, si in expanded if s["name"] == sn]
                     n1_in_shift = [assign[(n1, day, sn, pn, si)] for s, _, pn, si in expanded if s["name"] == sn]
                     if n2_in_shift and n1_in_shift:
@@ -632,6 +693,32 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
     spacing_obj = sum(consecutive_penalty_terms) * 5 if consecutive_penalty_terms else 0
     together_obj = sum(together_penalty_terms) * 3 if together_penalty_terms else 0
     total_obj = balance_obj + spacing_obj + together_obj
+
+    # ยัดคนที่ skill level สูงกว่าเข้าไปก่อน (ตำแหน่งที่ต้องการทักษะ) — CP-SAT ใช้ integer เท่านั้น
+    skill_pref_terms = []
+    for mt in mt_list:
+        levels = mt.get("skill_levels") or {}
+        skills_set = set(mt.get("skills") or [])
+        for day in range(num_days):
+            for shift, pos, pos_name, slot_i in expanded:
+                if not _is_slot_active_on_day(shift, pos, day, start_date, holiday_set):
+                    continue
+                if not _staff_can_work_position(mt, pos, catalog):
+                    continue
+                req = (pos.get("required_skill") or "").strip() if isinstance(pos, dict) else ""
+                if not req:
+                    continue
+                lvl = int(levels.get(req) or 0)
+                if req in skills_set and lvl < 1:
+                    lvl = 1
+                if lvl > 0:
+                    key = (mt["name"], day, shift["name"], pos_name, slot_i)
+                    skill_pref_terms.append((assign[key], -lvl))
+
+    if skill_pref_terms:
+        skill_obj = sum(v * c for v, c in skill_pref_terms)
+        total_obj = total_obj + skill_obj
+
     if dummy_terms:
         model.minimize(total_obj + sum(dummy_terms) * DUMMY_PENALTY)
     else:

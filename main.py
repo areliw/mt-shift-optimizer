@@ -134,6 +134,7 @@ class ShiftCreate(BaseModel):
     positions: list[PositionItem] | None = None
     active_days: str | None = None
     include_holidays: bool = False
+    min_fulltime: int = 0
 
 
 class ShiftUpdate(BaseModel):
@@ -143,6 +144,7 @@ class ShiftUpdate(BaseModel):
     positions: list[PositionItem] | None = None
     active_days: str | None = None
     include_holidays: bool = False
+    min_fulltime: int = 0
 
 
 class NumDaysUpdate(BaseModel):
@@ -158,7 +160,15 @@ class SettingsUpdate(BaseModel):
 class StaffPairCreate(BaseModel):
     staff_id_1: int
     staff_id_2: int
-    pair_type: str  # "together" or "apart"
+    pair_type: str  # "together", "apart", or "depends_on"
+    shift_names: list[str] | None = None  # ว่าง = ทุกกะ, มีค่า = เฉพาะกะนั้น
+
+
+class StaffPairBatchItem(BaseModel):
+    name_1: str
+    name_2: str
+    pair_type: str = "together"
+    shift_names: list[str] | None = None
 
 
 class ScheduleRunBody(BaseModel):
@@ -366,7 +376,7 @@ def api_create_shift(body: ShiftCreate):
     if body.positions is not None:
         positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0)), "active_weekdays": (p.active_weekdays or "").strip() or None} for p in body.positions]
     try:
-        sid = create_shift(body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, include_holidays=body.include_holidays)
+        sid = create_shift(body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, include_holidays=body.include_holidays, min_fulltime=body.min_fulltime)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="ชื่อกะซ้ำ มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
     out = {"id": sid, "name": body.name}
@@ -413,7 +423,7 @@ def api_update_shift(shift_id: int, body: ShiftUpdate):
     if body.positions is not None:
         positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0)), "active_weekdays": (p.active_weekdays or "").strip() or None} for p in body.positions]
     try:
-        update_shift(shift_id, body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, include_holidays=body.include_holidays)
+        update_shift(shift_id, body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, include_holidays=body.include_holidays, min_fulltime=body.min_fulltime)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="ชื่อกะซ้ำ มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
     out = {"id": shift_id, "name": body.name}
@@ -606,8 +616,42 @@ def api_add_staff_pair(body: StaffPairCreate):
         raise HTTPException(status_code=400, detail="ต้องเลือกคนละคน")
     if body.pair_type not in ("together", "apart", "depends_on"):
         raise HTTPException(status_code=400, detail="pair_type ต้องเป็น 'together', 'apart' หรือ 'depends_on'")
-    add_staff_pair(body.staff_id_1, body.staff_id_2, body.pair_type)
+    add_staff_pair(body.staff_id_1, body.staff_id_2, body.pair_type, shift_names=body.shift_names)
     return {"ok": True}
+
+
+@app.post("/api/staff-pairs/batch")
+def api_add_staff_pairs_batch(body: list[StaffPairBatchItem]):
+    """เพิ่มหลายคู่พร้อมกัน รองรับ name_1, name_2 (ชื่อบุคลากร)"""
+    from database import list_staff
+
+    staff_by_name = {s["name"]: s["id"] for s in list_staff()}
+    errors = []
+    for i, item in enumerate(body):
+        if not item.name_1 or not item.name_2:
+            errors.append(f"แถว {i + 1}: ต้องระบุชื่อทั้ง 2 คน")
+            continue
+        if item.name_1.strip() == item.name_2.strip():
+            errors.append(f"แถว {i + 1}: ต้องเลือกคนละคน")
+            continue
+        if item.pair_type not in ("together", "apart", "depends_on"):
+            errors.append(f"แถว {i + 1}: pair_type ต้องเป็น together, apart หรือ depends_on")
+            continue
+        if not staff_by_name.get(item.name_1.strip()):
+            errors.append(f"แถว {i + 1}: ไม่พบบุคลากร '{item.name_1}'")
+            continue
+        if not staff_by_name.get(item.name_2.strip()):
+            errors.append(f"แถว {i + 1}: ไม่พบบุคลากร '{item.name_2}'")
+            continue
+    if errors:
+        raise HTTPException(status_code=400, detail="; ".join(errors[:10]) + (" ..." if len(errors) > 10 else ""))
+    added = 0
+    for item in body:
+        s1 = staff_by_name[item.name_1.strip()]
+        s2 = staff_by_name[item.name_2.strip()]
+        add_staff_pair(s1, s2, item.pair_type, shift_names=item.shift_names)
+        added += 1
+    return {"ok": True, "added": added}
 
 
 @app.delete("/api/staff-pairs/{pair_id:int}")

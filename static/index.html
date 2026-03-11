@@ -93,7 +93,7 @@
       <section class="card card-step">
         <h2>จับคู่บุคลากร</h2>
         <p class="text-muted" style="margin:0 0 .75rem 0">กำหนดว่าใครอยากอยู่ด้วยกัน หรือห้ามอยู่ด้วยกัน</p>
-        <div class="form-inline" style="margin-bottom:.75rem; flex-wrap:wrap; gap:.5rem">
+        <div class="form-inline" style="margin-bottom:.75rem; flex-wrap:wrap; gap:.5rem; align-items:flex-start">
           <select id="pair_staff_1" style="min-width:8rem"><option value="">-- คนที่ 1 --</option></select>
           <select id="pair_type" style="min-width:9rem">
             <option value="together">อยู่ด้วยกัน</option>
@@ -101,6 +101,13 @@
             <option value="depends_on">คนที่ 2 ต้องอยู่กับ คนที่ 1</option>
           </select>
           <select id="pair_staff_2" style="min-width:8rem"><option value="">-- คนที่ 2 --</option></select>
+          <div class="pair-shifts-wrap" style="display:flex; align-items:center; gap:.5rem; flex-wrap:wrap">
+            <label class="pair-shift-toggle" style="display:inline-flex; align-items:center; gap:.35rem; cursor:pointer; white-space:nowrap">
+              <input type="checkbox" id="pair_shift_filter_on" />
+              <span>เฉพาะกะ</span>
+            </label>
+            <div id="pair_shifts_checkboxes" class="pair-shifts-checkboxes" style="display:none; flex-wrap:wrap; gap:.4rem"></div>
+          </div>
           <button type="button" id="add_pair" class="btn-primary">+ เพิ่ม</button>
         </div>
         <ul id="pair_list" class="skill-list"></ul>
@@ -277,13 +284,25 @@
             <label class="staff-day-cb" style="margin-left:.5rem">
               <input type="checkbox" id="shift_include_holidays" /> รวมวันหยุดราชการ
             </label>
+            <label for="shift_min_fulltime" style="margin-left:.75rem">เจ้าหน้าที่ประจำขั้นต่ำ</label>
+            <select id="shift_min_fulltime" title="เต็มเวลาขั้นต่ำรวมทุกช่องในกะ (0 = ยืดหยุ่น)">
+              <option value="0">ยืดหยุ่น</option>
+              <option value="1">≥1 คน</option>
+              <option value="2">≥2 คน</option>
+              <option value="3">≥3 คน</option>
+              <option value="4">≥4 คน</option>
+              <option value="5">≥5 คน</option>
+            </select>
           </div>
-          <p class="text-muted" style="font-size:.82rem;margin:.25rem 0 0">
-            - <strong>รวมเสาร์–อาทิตย์ได้:</strong> ใส่ <code>5,6</code> = กะนี้เปิดเฉพาะเสาร์และอาทิตย์ (0=จันทร์ … 5=เสาร์, 6=อาทิตย์)<br />
-            - <code>0,1,2,3,4</code> = จันทร์–ศุกร์, ว่าง = เปิดทุกวัน<br />
-            - ถ้าติ๊ก "<strong>รวมวันหยุดราชการ</strong>" ระบบจะเปิดกะนี้ในวันหยุดราชการทุกวันที่ตั้งไว้ <em>เพิ่มจาก</em> เลขวันด้านบน (เช่น กำหนด <code>5,6</code> แล้ววันหยุดอยู่พุธ กะนี้จะเปิดเสาร์–อาทิตย์ + พุธที่เป็นวันหยุด)<br />
-            - <strong>วันเดียวกันอาจมีหลายกะเปิด:</strong> ถ้าวันหยุดราชการตรงกับวันธรรมดา (เช่น พุธ) ทั้งกะที่เปิดจ–ศ และกะที่เปิดเสาร์–อาทิตย์+วันหยุด จะเปิดวันนั้นพร้อมกัน — ไม่ชนกัน ระบบจัดคนแยกกันต่อกะ
-          </p>
+          <details class="shift-help" style="margin-top:.5rem">
+            <summary class="shift-help-summary">วิธีใช้</summary>
+            <ul class="shift-help-list">
+              <li><strong>รวมเสาร์–อาทิตย์:</strong> ใส่ <code>5,6</code> = เปิดเฉพาะเสาร์–อาทิตย์ (0=จ … 6=อา)</li>
+              <li><code>0,1,2,3,4</code> = จ–ศ, ว่าง = เปิดทุกวัน</li>
+              <li><strong>รวมวันหยุดราชการ:</strong> เปิดในวันหยุดที่ตั้งไว้ <em>เพิ่มจาก</em> เลขวันด้านบน</li>
+              <li><strong>วันเดียวกันหลายกะ:</strong> ระบบจัดคนแยกกันต่อกะ ไม่ชนกัน</li>
+            </ul>
+          </details>
           <div class="positions-editor">
             <span>ช่องในกะ</span>
             <div id="shift_positions_list"></div>

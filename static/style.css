@@ -1349,6 +1349,18 @@ li .name { flex: 1; }
 .pair-apart { color: #c62828; font-weight: 500; }
 .pair-depends { color: #1565c0; font-weight: 500; }
 
+.pair-shift-chip:hover { background: var(--accent-pale, #f0fdf4); border-color: var(--accent, #059669); }
+.pair-shift-chip:has(.pair-shift-cb:checked) { background: var(--accent-light, #d1fae5); border-color: var(--accent, #059669); }
+
+.shift-help { font-size: .88rem; color: var(--muted); }
+.shift-help-summary { cursor: pointer; padding: .35rem 0; list-style: none; }
+.shift-help-summary::-webkit-details-marker { display: none; }
+.shift-help-summary::before { content: "▸ "; }
+.shift-help[open] .shift-help-summary::before { content: "▾ "; }
+.shift-help-list { margin: .25rem 0 0 1rem; padding-left: .5rem; line-height: 1.7; }
+.shift-help-list li { margin-bottom: .25rem; }
+
+
 /* Holiday calendar */
 .holiday-calendar { user-select: none; }
 .holiday-cal-header {
