@@ -278,6 +278,10 @@
               <input type="checkbox" id="shift_include_holidays" /> รวมวันหยุดราชการ
             </label>
           </div>
+          <p class="text-muted" style="font-size:.82rem;margin:.25rem 0 0">
+            - กรอกเลขวัน (0=จันทร์ … 6=อาทิตย์) ที่ <strong>กะนี้เปิดทำการประจำ</strong> เช่น <code>0,1,2,3,4</code> = จันทร์–ศุกร์, <code>5,6</code> = เสาร์–อาทิตย์<br />
+            - ถ้าติ๊ก "<strong>รวมวันหยุดราชการ</strong>" ระบบจะเปิดกะนี้ใน <strong>ทุกวันที่กำหนดในวันหยุดราชการ</strong> เพิ่มด้วย (นอกเหนือจากเลขวันด้านหน้า) เช่น กำหนดเป็น <code>5,6</code> และวันหยุดอยู่วันพุธ/ศุกร์ กะนี้จะเปิดทั้งเสาร์–อาทิตย์และวันหยุดพุธ/ศุกร์ด้วย
+          </p>
           <div class="positions-editor">
             <span>ช่องในกะ</span>
             <div id="shift_positions_list"></div>

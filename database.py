@@ -1029,14 +1029,52 @@ def list_shifts(conn=None):
             active_days = r[4] if len(r) > 4 else None
             include_holidays = bool(r[5]) if len(r) > 5 else False
             pos_rows = conn.execute(
-                "SELECT name, constraint_note, regular_only, COALESCE(slot_count, 1), time_window_name, COALESCE(allowed_titles,'[]'), COALESCE(max_per_week, 0) FROM shift_position WHERE shift_id = ? ORDER BY sort_order",
+                """
+                SELECT
+                    name,
+                    constraint_note,
+                    regular_only,
+                    COALESCE(slot_count, 1),
+                    time_window_name,
+                    COALESCE(required_skill, ''),
+                    COALESCE(min_skill_level, 0),
+                    COALESCE(allowed_titles, '[]'),
+                    COALESCE(max_per_week, 0)
+                FROM shift_position
+                WHERE shift_id = ?
+                ORDER BY sort_order
+                """,
                 (sid,),
             ).fetchall()
             if pos_rows:
-                positions = [
-                    {"name": p[0], "constraint_note": p[1] or "", "regular_only": bool(p[2]), "slot_count": int(p[3]), "time_window_name": (p[4] if len(p) > 4 and p[4] else None) or "", "allowed_titles": json.loads(p[5] or "[]"), "max_per_week": int(p[6] or 0)}
-                    for p in pos_rows
-                ]
+                positions = []
+                for p in pos_rows:
+                    name_p = p[0]
+                    note_p = p[1] or ""
+                    reg_p = bool(p[2])
+                    cnt_p = int(p[3])
+                    tw_p = (p[4] if len(p) > 4 and p[4] else None) or ""
+                    req_p = p[5] if len(p) > 5 else ""
+                    lvl_p = int(p[6] or 0) if len(p) > 6 else 0
+                    allowed_raw = p[7] if len(p) > 7 else "[]"
+                    mpw_p = int(p[8] or 0) if len(p) > 8 else 0
+                    try:
+                        allowed_list = json.loads(allowed_raw or "[]")
+                    except Exception:
+                        allowed_list = []
+                    positions.append(
+                        {
+                            "name": name_p,
+                            "constraint_note": note_p,
+                            "regular_only": reg_p,
+                            "slot_count": cnt_p,
+                            "time_window_name": tw_p,
+                            "required_skill": req_p,
+                            "min_skill_level": lvl_p,
+                            "allowed_titles": allowed_list,
+                            "max_per_week": mpw_p,
+                        }
+                    )
                 result.append({"id": sid, "name": name, "positions": positions, "active_days": active_days, "include_holidays": include_holidays})
             else:
                 result.append({
