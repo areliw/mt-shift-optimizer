@@ -717,28 +717,42 @@ function renderSchedule(data, staffList) {
   for (let d = 0; d < displayDays; d++) days.push(d);
   const posKey = data.slots.length && data.slots[0].position != null ? "position" : "room";
 
-  // Build map: "day-shift-pos" → [slot object]
-  const byDayShiftPos = {};
+  // Build byDayShiftPosSlot: "day-shift-pos" → { slotIdx: slot }
+  const byDayShiftPosSlot = {};
   data.slots.forEach((s) => {
     const pos = s[posKey] || s.room || s.position || "";
     const key = `${s.day}-${s.shift_name}-${pos}`;
-    if (!byDayShiftPos[key]) byDayShiftPos[key] = [];
-    byDayShiftPos[key].push(s);
+    if (!byDayShiftPosSlot[key]) byDayShiftPosSlot[key] = {};
+    byDayShiftPosSlot[key][s.slot_index ?? 0] = s;
   });
-  // Build shiftPositions from the shift definitions (preserves sort_order from DB)
+
+  // Build shiftPositions (ordered) and shiftSlotCounts from definitions
   const shiftPositions = {};
+  const shiftSlotCounts = {}; // sn -> pos -> count
   (shiftsCache || []).forEach((sh) => {
     if (sh.positions && sh.positions.length) {
       shiftPositions[sh.name] = sh.positions.map((p) => (typeof p === "string" ? p : p.name));
+      shiftSlotCounts[sh.name] = {};
+      sh.positions.forEach((p) => {
+        const pName = typeof p === "string" ? p : p.name;
+        shiftSlotCounts[sh.name][pName] = (typeof p === "object" && p.slot_count) ? Math.max(1, p.slot_count) : 1;
+      });
     }
   });
-  // Augment with any position names found in slots that aren't already in the definition
+  // Augment with positions found in slots not covered by definition
   data.slots.forEach((s) => {
     const sn = s.shift_name;
     const pos = s[posKey] || s.room || s.position || "";
     if (!shiftPositions[sn]) shiftPositions[sn] = [];
     if (!shiftPositions[sn].includes(pos)) shiftPositions[sn].push(pos);
+    if (!shiftSlotCounts[sn]) shiftSlotCounts[sn] = {};
+    if (!shiftSlotCounts[sn][pos]) shiftSlotCounts[sn][pos] = 1;
   });
+
+  function _posSlotCount(sn, pos) { return (shiftSlotCounts[sn] && shiftSlotCounts[sn][pos]) || 1; }
+  function _shiftTotalCols(sn) {
+    return (shiftPositions[sn] || []).reduce((acc, p) => acc + _posSlotCount(sn, p), 0) || 1;
+  }
 
   // --- Group/sort shifts by "room" suffix for readability (Template 5) ---
   function parseRoomAndKind(shiftName) {
@@ -779,8 +793,7 @@ function renderSchedule(data, staffList) {
       let colSpan = 0;
       let j = i;
       while (j < shiftsMeta.length && (shiftsMeta[j].room || "อื่นๆ") === room) {
-        const sn = shiftsMeta[j].name;
-        colSpan += (shiftPositions[sn] || []).length || 1;
+        colSpan += _shiftTotalCols(shiftsMeta[j].name);
         j++;
       }
       html += `<th class="th-room" colspan="${colSpan}">${escapeHtml(room)}</th>`;
@@ -790,8 +803,7 @@ function renderSchedule(data, staffList) {
   } else {
     html += "<tr><th class=\"th-day\" rowspan=\"2\">วัน</th>";
     shiftNames.forEach((sn) => {
-      const cols = (shiftPositions[sn] || []).length || 1;
-      html += `<th colspan="${cols}">${escapeHtml(sn)}</th>`;
+      html += `<th colspan="${_shiftTotalCols(sn)}">${escapeHtml(sn)}</th>`;
     });
     html += "</tr>";
   }
@@ -799,20 +811,23 @@ function renderSchedule(data, staffList) {
   // Shift row (always)
   html += "<tr>";
   shiftNames.forEach((sn) => {
-    const cols = (shiftPositions[sn] || []).length || 1;
     const meta = shiftsMeta.find((m) => m.name === sn) || {};
     const room = meta.room || "";
-    html += `<th class="th-shift" data-room="${escapeHtml(room)}" colspan="${cols}">${escapeHtml(sn)}</th>`;
+    html += `<th class="th-shift" data-room="${escapeHtml(room)}" colspan="${_shiftTotalCols(sn)}">${escapeHtml(sn)}</th>`;
   });
   html += "</tr>";
 
-  // Position row
+  // Position row — one <th> per slot
   html += "<tr>";
   shiftNames.forEach((sn) => {
     const meta = shiftsMeta.find((m) => m.name === sn) || {};
     const room = meta.room || "";
     (shiftPositions[sn] || ["ช่อง"]).forEach((pos) => {
-      html += `<th class="th-pos" data-room="${escapeHtml(room)}">${escapeHtml(pos)}</th>`;
+      const cnt = _posSlotCount(sn, pos);
+      for (let si = 0; si < cnt; si++) {
+        const label = cnt > 1 ? `${escapeHtml(pos)} ${si + 1}` : escapeHtml(pos);
+        html += `<th class="th-pos" data-room="${escapeHtml(room)}">${label}</th>`;
+      }
     });
   });
   html += "</tr></thead><tbody>";
@@ -831,29 +846,27 @@ function renderSchedule(data, staffList) {
       const meta = shiftsMeta.find((m) => m.name === sn) || {};
       const room = meta.room || "";
       const shiftHasAnySlotToday = shiftActiveOnDay[`${day}-${sn}`];
-      (shiftPositions[sn] || []).forEach((pos) => {
-        const slotList = byDayShiftPos[`${day}-${sn}-${pos}`] || [];
-        if (slotList.length === 0) {
-          const cls = (room && prevRoom !== null && room !== prevRoom) ? " td-room-sep" : "";
-          html += shiftHasAnySlotToday ? `<td class="${cls.trim()}"></td>` : `<td class="td-inactive${cls}" title="กะนี้ไม่เปิดวันนี้">—</td>`;
-          prevRoom = room || prevRoom;
-          return;
-        }
-        const hasDummy = slotList.some((s) => s.is_dummy);
-        const parts = slotList.map((s) => {
-          if (s.is_dummy) {
-            const si = s.slot_index != null ? s.slot_index : 0;
-            return `<span class="cell-dummy" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" title="คลิกเพื่อมอบหมาย">ว่าง</span>`;
+      (shiftPositions[sn] || []).forEach((pos, posIdx) => {
+        const cnt = _posSlotCount(sn, pos);
+        const slotMap = byDayShiftPosSlot[`${day}-${sn}-${pos}`] || {};
+        for (let si = 0; si < cnt; si++) {
+          const isFirstOfRoom = (room && prevRoom !== null && room !== prevRoom && posIdx === 0 && si === 0);
+          const roomSep = isFirstOfRoom ? " td-room-sep" : "";
+          const s = slotMap[si];
+          if (!s) {
+            if (!shiftHasAnySlotToday) {
+              html += `<td class="td-inactive${roomSep}" title="กะนี้ไม่เปิดวันนี้">—</td>`;
+            } else {
+              html += `<td class="${roomSep.trim()}"></td>`;
+            }
+          } else if (s.is_dummy) {
+            html += `<td class="td-has-dummy${roomSep}"><span class="cell-dummy" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" title="คลิกเพื่อมอบหมาย">ว่าง</span></td>`;
+          } else {
+            const nameSpan = `<span class="cell-name" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" data-name="${escapeHtml(s.staff_name)}" title="คลิกเพื่อเปลี่ยน">${escapeHtml(s.staff_name)}</span>`;
+            const content = s.time_window ? `${nameSpan} <small class="tw-label">(${escapeHtml(s.time_window)})</small>` : nameSpan;
+            html += `<td${roomSep ? ` class="${roomSep.trim()}"` : ""}>${content}</td>`;
           }
-          const si = s.slot_index != null ? s.slot_index : 0;
-          const nameSpan = `<span class="cell-name" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" data-name="${escapeHtml(s.staff_name)}" title="คลิกเพื่อเปลี่ยน">${escapeHtml(s.staff_name)}</span>`;
-          return s.time_window
-            ? `${nameSpan} <small class="tw-label">(${escapeHtml(s.time_window)})</small>`
-            : nameSpan;
-        });
-        const sepClass = (room && prevRoom !== null && room !== prevRoom) ? " td-room-sep" : "";
-        const cls = (hasDummy ? "td-has-dummy" : "") + sepClass;
-        html += `<td${cls.trim() ? ` class="${cls.trim()}"` : ""}>${parts.join(", ")}</td>`;
+        }
         prevRoom = room || prevRoom;
       });
     });

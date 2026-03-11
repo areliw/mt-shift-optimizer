@@ -593,6 +593,11 @@ textarea:focus {
   color: var(--primary);
   border-bottom-color: var(--primary);
 }
+span.slot-divider {
+  color: #cbd5e1;
+  font-weight: 300;
+  user-select: none;
+}
 
 .cell-dummy-preview {
   display: inline-flex;
