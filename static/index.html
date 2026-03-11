@@ -272,15 +272,17 @@
             </span>
           </div>
           <div class="form-inline" style="margin-top:.5rem">
-            <label for="shift_active_days">Active days (0=จ..6=อา)</label>
-            <input type="text" id="shift_active_days" placeholder="เช่น 0,1,2,3,4 หรือว่าง=ทุกวัน" style="width:14rem" />
+            <label for="shift_active_days">วันที่กะนี้เปิด (0=จ … 6=อา)</label>
+            <input type="text" id="shift_active_days" placeholder="เช่น 5,6 = เสาร์-อาทิตย์ หรือ 0,1,2,3,4 = จ-ศ (ว่าง=ทุกวัน)" style="width:22rem" />
             <label class="staff-day-cb" style="margin-left:.5rem">
               <input type="checkbox" id="shift_include_holidays" /> รวมวันหยุดราชการ
             </label>
           </div>
           <p class="text-muted" style="font-size:.82rem;margin:.25rem 0 0">
-            - กรอกเลขวัน (0=จันทร์ … 6=อาทิตย์) ที่ <strong>กะนี้เปิดทำการประจำ</strong> เช่น <code>0,1,2,3,4</code> = จันทร์–ศุกร์, <code>5,6</code> = เสาร์–อาทิตย์<br />
-            - ถ้าติ๊ก "<strong>รวมวันหยุดราชการ</strong>" ระบบจะเปิดกะนี้ใน <strong>ทุกวันที่กำหนดในวันหยุดราชการ</strong> เพิ่มด้วย (นอกเหนือจากเลขวันด้านหน้า) เช่น กำหนดเป็น <code>5,6</code> และวันหยุดอยู่วันพุธ/ศุกร์ กะนี้จะเปิดทั้งเสาร์–อาทิตย์และวันหยุดพุธ/ศุกร์ด้วย
+            - <strong>รวมเสาร์–อาทิตย์ได้:</strong> ใส่ <code>5,6</code> = กะนี้เปิดเฉพาะเสาร์และอาทิตย์ (0=จันทร์ … 5=เสาร์, 6=อาทิตย์)<br />
+            - <code>0,1,2,3,4</code> = จันทร์–ศุกร์, ว่าง = เปิดทุกวัน<br />
+            - ถ้าติ๊ก "<strong>รวมวันหยุดราชการ</strong>" ระบบจะเปิดกะนี้ในวันหยุดราชการทุกวันที่ตั้งไว้ <em>เพิ่มจาก</em> เลขวันด้านบน (เช่น กำหนด <code>5,6</code> แล้ววันหยุดอยู่พุธ กะนี้จะเปิดเสาร์–อาทิตย์ + พุธที่เป็นวันหยุด)<br />
+            - <strong>วันเดียวกันอาจมีหลายกะเปิด:</strong> ถ้าวันหยุดราชการตรงกับวันธรรมดา (เช่น พุธ) ทั้งกะที่เปิดจ–ศ และกะที่เปิดเสาร์–อาทิตย์+วันหยุด จะเปิดวันนั้นพร้อมกัน — ไม่ชนกัน ระบบจัดคนแยกกันต่อกะ
           </p>
           <div class="positions-editor">
             <span>ช่องในกะ</span>

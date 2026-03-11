@@ -109,6 +109,7 @@ class PositionItem(BaseModel):
     min_skill_level: int = 0  # ระดับ skill ขั้นต่ำ (0=ไม่กำหนด, 1=ต่ำ, 2=กลาง, 3=สูง)
     allowed_titles: list[str] = []  # ฉายาที่อนุญาต (ว่าง = ทุกฉายา)
     max_per_week: int = 0  # สูงสุดกี่ครั้ง/สัปดาห์ (0 = ไม่จำกัด)
+    active_weekdays: str | None = None  # เปิดเฉพาะวัน (0=จ … 6=อา) เช่น "6" = อาทิตย์เท่านั้น ว่าง = ทุกวันที่กะเปิด
 
 
 class TimeWindowCreate(BaseModel):
@@ -340,7 +341,10 @@ def api_add_title(body: TitleCreate):
     stype = (body.type or "fulltime").lower()
     if stype not in ("fulltime", "parttime"):
         stype = "fulltime"
-    add_title_catalog(name, stype)
+    try:
+        add_title_catalog(name, stype)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="ชื่อฉายาซ้ำ มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
     return {"name": name, "type": stype}
 
 
@@ -360,8 +364,11 @@ def api_list_shifts():
 def api_create_shift(body: ShiftCreate):
     positions = None
     if body.positions is not None:
-        positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0))} for p in body.positions]
-    sid = create_shift(body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, include_holidays=body.include_holidays)
+        positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0)), "active_weekdays": (p.active_weekdays or "").strip() or None} for p in body.positions]
+    try:
+        sid = create_shift(body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, include_holidays=body.include_holidays)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="ชื่อกะซ้ำ มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
     out = {"id": sid, "name": body.name}
     if positions is not None:
         out["positions"] = [{"name": p["name"], "constraint_note": p["constraint_note"], "regular_only": p["regular_only"], "slot_count": p.get("slot_count", 1)} for p in positions]
@@ -404,8 +411,11 @@ def api_clear_all():
 def api_update_shift(shift_id: int, body: ShiftUpdate):
     positions = None
     if body.positions is not None:
-        positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0))} for p in body.positions]
-    update_shift(shift_id, body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, include_holidays=body.include_holidays)
+        positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0)), "active_weekdays": (p.active_weekdays or "").strip() or None} for p in body.positions]
+    try:
+        update_shift(shift_id, body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, include_holidays=body.include_holidays)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="ชื่อกะซ้ำ มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
     out = {"id": shift_id, "name": body.name}
     if positions is not None:
         out["positions"] = [{"name": p["name"], "constraint_note": p["constraint_note"], "regular_only": p["regular_only"], "slot_count": p.get("slot_count", 1)} for p in positions]

@@ -605,8 +605,9 @@ function startEditShift(shiftId) {
       const minLvl = typeof p === "object" && p.min_skill_level ? p.min_skill_level : 0;
       const allowedTitles = typeof p === "object" && Array.isArray(p.allowed_titles) ? p.allowed_titles : [];
       const maxPerWeek = typeof p === "object" && p.max_per_week != null ? p.max_per_week : 0;
+      const activeWeekdays = typeof p === "object" && p.active_weekdays ? p.active_weekdays : "";
       if (typeof addPositionRow === "function") {
-        addPositionRow(name, note, slotCount, tw, reqSkill, minLvl, allowedTitles, maxPerWeek);
+        addPositionRow(name, note, slotCount, tw, reqSkill, minLvl, allowedTitles, maxPerWeek, activeWeekdays);
       }
     });
   }
@@ -1121,6 +1122,17 @@ async function refreshSkills() {
   lastCounts.skills = arr.length;
   updateNavBadges();
   updateHomeProcessSteps();
+
+  // อัปเดต dropdown "ทักษะที่ต้องการ" ในฟอร์มกะให้ตรงกับรายการทักษะล่าสุด
+  document.querySelectorAll(".position-required-skill").forEach((sel) => {
+    const current = sel.value || "";
+    const options = (window.skillsCatalog || []).map((s) => {
+      const sname = typeof s === "string" ? s : s.name;
+      return `<option value="${escapeHtml(sname)}">${escapeHtml(sname)}</option>`;
+    }).join("");
+    sel.innerHTML = "<option value=\"\">-- ทักษะ --</option>" + options;
+    if (current) sel.value = current;
+  });
 }
 
 function renderTitleList(titles) {
@@ -1471,13 +1483,13 @@ document.getElementById("add_time_window").addEventListener("click", async () =>
   }
 });
 
-function addPositionRow(name = "", note = "", slotCount = 1, timeWindowName = "", requiredSkill = "", minSkillLevel = 0, allowedTitles = [], maxPerWeek = 0) {
+function addPositionRow(name = "", note = "", slotCount = 1, timeWindowName = "", requiredSkill = "", minSkillLevel = 0, allowedTitles = [], maxPerWeek = 0, activeWeekdays = "") {
   const list = document.getElementById("shift_positions_list");
   const posIndex = list.querySelectorAll(".pos-card").length + 1;
   const card = document.createElement("div");
   card.className = "pos-card";
 
-  const hasAdvanced = !!(requiredSkill || minSkillLevel || (allowedTitles && allowedTitles.length) || maxPerWeek || note);
+  const hasAdvanced = !!(requiredSkill || minSkillLevel || (allowedTitles && allowedTitles.length) || maxPerWeek || note || activeWeekdays);
 
   // --- Header row: badge + name + count + time window + toggle + delete ---
   const header = document.createElement("div");
@@ -1593,6 +1605,20 @@ function addPositionRow(name = "", note = "", slotCount = 1, timeWindowName = ""
   mpwSel.innerHTML = '<option value="0">ไม่จำกัด/wk</option><option value="1">≤1/wk</option><option value="2">≤2/wk</option><option value="3">≤3/wk</option>';
   mpwSel.value = String(maxPerWeek || 0);
 
+  const awWrap = document.createElement("span");
+  awWrap.className = "position-active-weekdays-wrap";
+  awWrap.title = "เปิดเฉพาะวัน (0=จ … 6=อา) เช่น 6 = อาทิตย์เท่านั้น ว่าง = ทุกวันที่กะเปิด";
+  const awLabel = document.createElement("label");
+  awLabel.textContent = "เปิดเฉพาะวัน: ";
+  const awIn = document.createElement("input");
+  awIn.type = "text";
+  awIn.className = "position-active-weekdays";
+  awIn.placeholder = "ว่าง=ทุกวัน หรือ 6 หรือ 5,6";
+  awIn.value = activeWeekdays || "";
+  awIn.style.width = "6rem";
+  awWrap.appendChild(awLabel);
+  awWrap.appendChild(awIn);
+
   const noteIn = document.createElement("input");
   noteIn.type = "text";
   noteIn.className = "position-note";
@@ -1603,6 +1629,7 @@ function addPositionRow(name = "", note = "", slotCount = 1, timeWindowName = ""
   adv.appendChild(lvlSel);
   adv.appendChild(titlesWrap);
   adv.appendChild(mpwSel);
+  adv.appendChild(awWrap);
   adv.appendChild(noteIn);
 
   // Toggle handler
@@ -1643,7 +1670,9 @@ function collectShiftPositions() {
     const allowed_titles = Array.from(titleCbs).map((cb) => cb.value);
     const mpwEl = card.querySelector(".position-max-per-week");
     const max_per_week = mpwEl ? parseInt(mpwEl.value, 10) || 0 : 0;
-    if (name) positions.push({ name, constraint_note: note, regular_only: false, slot_count, time_window_name, required_skill, min_skill_level, allowed_titles, max_per_week });
+    const awEl = card.querySelector(".position-active-weekdays");
+    const active_weekdays = (awEl && awEl.value && awEl.value.trim()) || null;
+    if (name) positions.push({ name, constraint_note: note, regular_only: false, slot_count, time_window_name, required_skill, min_skill_level, allowed_titles, max_per_week, active_weekdays });
   });
   return positions;
 }
@@ -1756,7 +1785,7 @@ async function applyTemplate(templateId) {
       " — พร้อมสร้างตารางเวร";
     msg.className = "message success";
   }
-  showPage("home");
+  await showPage("home");
 }
 
 document.getElementById("template_1").addEventListener("click", () => applyTemplate(1));
@@ -1878,7 +1907,7 @@ document.getElementById("run_schedule").addEventListener("click", async () => {
   }
 });
 
-function showPage(pageId) {
+async function showPage(pageId) {
   document.querySelectorAll(".app-page").forEach((el) => {
     el.style.display = el.id === "page-" + pageId ? "" : "none";
   });
@@ -1889,9 +1918,9 @@ function showPage(pageId) {
     refreshPairs();
   }
   if (pageId === "skills") {
-    refreshSkills();
-    refreshTitles();
-    refreshTimeWindows();
+    await refreshSkills();
+    await refreshTitles();
+    await refreshTimeWindows();
   }
   if (pageId === "staff") {
     refreshStaffAddSkills();
@@ -1900,14 +1929,14 @@ function showPage(pageId) {
   }
   if (pageId === "shifts") {
     fetch(API + "/time-windows").then((r) => r.ok ? r.json() : []).then((list) => { timeWindowCatalog = Array.isArray(list) ? list : []; }).catch(() => {});
-    refreshShifts();
+    await Promise.all([refreshShifts(), refreshSkills(), refreshTitles()]);
   }
 }
 
 document.querySelectorAll(".app-nav-item").forEach((a) => {
-  a.addEventListener("click", (e) => {
+  a.addEventListener("click", async (e) => {
     e.preventDefault();
-    showPage(a.dataset.page);
+    await showPage(a.dataset.page);
   });
 });
 
@@ -2141,10 +2170,9 @@ async function init() {
   fillPresetYear();
   fetch(API + "/time-windows").then((r) => r.ok ? r.json() : []).then((list) => { timeWindowCatalog = Array.isArray(list) ? list : []; }).catch(() => {});
   addPositionRow();
-  showPage("home");
+  await showPage("home");
   await refreshSettings();
-  await refreshStaff();
-  await refreshShifts();
+  await Promise.all([refreshStaff(), refreshShifts(), refreshSkills(), refreshTitles()]);
   await refreshStaffAddSkills();
   await refreshStaffTitleSelect();
   await refreshStaffAddTimeWindows();

@@ -188,6 +188,7 @@ def init_db(conn=None):
         _migrate_staff_min_gap_rules(conn)
         _migrate_shift_include_holidays(conn)
         _migrate_staff_pair(conn)
+        _migrate_shift_position_active_weekdays(conn)
     finally:
         if close:
             conn.close()
@@ -345,6 +346,15 @@ def _migrate_shift_position_allowed_titles(conn):
         pass
 
 
+def _migrate_shift_position_active_weekdays(conn):
+    """ตำแหน่งเปิดเฉพาะวันในสัปดาห์ (0=จ … 6=อา) เช่น "6" = อาทิตย์เท่านั้น ว่าง = ทุกวันที่กะเปิด"""
+    try:
+        conn.execute("ALTER TABLE shift_position ADD COLUMN active_weekdays TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _migrate_skill_level_table(conn):
     """สร้างตาราง skill_level สำหรับระดับทักษะกำหนดเองต่อทักษะ"""
     conn.execute("""
@@ -426,7 +436,9 @@ def _migrate_title_catalog(conn):
     conn.execute(
         "CREATE TABLE IF NOT EXISTS title_catalog (name TEXT PRIMARY KEY, type TEXT NOT NULL DEFAULT 'fulltime' CHECK (type IN ('fulltime', 'parttime')))"
     )
-    conn.execute("INSERT OR IGNORE INTO title_catalog (name, type) VALUES ('เต็มเวลา', 'fulltime'), ('พาร์ทไทม์', 'parttime')")
+    # ใส่ default เฉพาะครั้งแรกที่ตารางว่าง — ถ้าผู้ใช้ลบแล้วจะไม่โผล่กลับหลัง refresh/restart
+    if conn.execute("SELECT 1 FROM title_catalog LIMIT 1").fetchone() is None:
+        conn.execute("INSERT INTO title_catalog (name, type) VALUES ('เต็มเวลา', 'fulltime'), ('พาร์ทไทม์', 'parttime')")
     conn.commit()
 
 
@@ -460,18 +472,12 @@ def _migrate_time_window_catalog(conn):
             end_time TEXT NOT NULL
         )
     """)
-    conn.execute(
-        "INSERT OR IGNORE INTO time_window_catalog (name, start_time, end_time) VALUES (?, ?, ?)",
-        ("06:30-08:30", "06:30", "08:30"),
-    )
-    conn.execute(
-        "INSERT OR IGNORE INTO time_window_catalog (name, start_time, end_time) VALUES (?, ?, ?)",
-        ("06:30-10:00", "06:30", "10:00"),
-    )
-    conn.execute(
-        "INSERT OR IGNORE INTO time_window_catalog (name, start_time, end_time) VALUES (?, ?, ?)",
-        ("06:30-12:00", "06:30", "12:00"),
-    )
+    # ใส่ default เฉพาะครั้งแรกที่ตารางว่าง — ถ้าผู้ใช้ลบแล้วจะไม่โผล่กลับหลัง refresh/restart
+    if conn.execute("SELECT 1 FROM time_window_catalog LIMIT 1").fetchone() is None:
+        conn.execute(
+            "INSERT INTO time_window_catalog (name, start_time, end_time) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)",
+            ("06:30-08:30", "06:30", "08:30", "06:30-10:00", "06:30", "10:00", "06:30-12:00", "06:30", "12:00"),
+        )
     conn.commit()
 
 
@@ -602,7 +608,7 @@ def add_title_catalog(name: str, stype: str = "fulltime", conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        conn.execute("INSERT OR IGNORE INTO title_catalog (name, type) VALUES (?, ?)", (name.strip(), stype))
+        conn.execute("INSERT INTO title_catalog (name, type) VALUES (?, ?)", (name.strip(), stype))
         conn.commit()
     finally:
         if close:
@@ -1039,7 +1045,8 @@ def list_shifts(conn=None):
                     COALESCE(required_skill, ''),
                     COALESCE(min_skill_level, 0),
                     COALESCE(allowed_titles, '[]'),
-                    COALESCE(max_per_week, 0)
+                    COALESCE(max_per_week, 0),
+                    active_weekdays
                 FROM shift_position
                 WHERE shift_id = ?
                 ORDER BY sort_order
@@ -1058,6 +1065,7 @@ def list_shifts(conn=None):
                     lvl_p = int(p[6] or 0) if len(p) > 6 else 0
                     allowed_raw = p[7] if len(p) > 7 else "[]"
                     mpw_p = int(p[8] or 0) if len(p) > 8 else 0
+                    aw_p = (p[9] if len(p) > 9 and p[9] else None) or ""
                     try:
                         allowed_list = json.loads(allowed_raw or "[]")
                     except Exception:
@@ -1073,6 +1081,7 @@ def list_shifts(conn=None):
                             "min_skill_level": lvl_p,
                             "allowed_titles": allowed_list,
                             "max_per_week": mpw_p,
+                            "active_weekdays": aw_p or None,
                         }
                     )
                 result.append({"id": sid, "name": name, "positions": positions, "active_days": active_days, "include_holidays": include_holidays})
@@ -1104,9 +1113,10 @@ def _insert_position(conn, shift_id, index, p):
     allowed = p.get("allowed_titles") or []
     allowed_json = json.dumps(allowed, ensure_ascii=False) if allowed else None
     mpw = max(0, int(p.get("max_per_week") or 0))
+    aw = (p.get("active_weekdays") or "").strip() or None
     conn.execute(
-        "INSERT INTO shift_position (shift_id, name, sort_order, constraint_note, regular_only, slot_count, time_window_name, required_skill, min_skill_level, allowed_titles, max_per_week) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (shift_id, nm, index, note, reg, cnt, tw, req_skill, min_lvl, allowed_json, mpw),
+        "INSERT INTO shift_position (shift_id, name, sort_order, constraint_note, regular_only, slot_count, time_window_name, required_skill, min_skill_level, allowed_titles, max_per_week, active_weekdays) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (shift_id, nm, index, note, reg, cnt, tw, req_skill, min_lvl, allowed_json, mpw, aw),
     )
 
 
@@ -1343,7 +1353,7 @@ def get_shift_list(conn=None):
             active_days = r[4] if len(r) > 4 else None
             include_holidays = bool(r[5]) if len(r) > 5 else False
             pos_rows = conn.execute(
-                "SELECT name, regular_only, COALESCE(slot_count, 1), time_window_name, COALESCE(required_skill,''), COALESCE(min_skill_level,0), COALESCE(allowed_titles,'[]'), COALESCE(max_per_week,0) FROM shift_position WHERE shift_id = ? ORDER BY sort_order",
+                "SELECT name, regular_only, COALESCE(slot_count, 1), time_window_name, COALESCE(required_skill,''), COALESCE(min_skill_level,0), COALESCE(allowed_titles,'[]'), COALESCE(max_per_week,0), active_weekdays FROM shift_position WHERE shift_id = ? ORDER BY sort_order",
                 (sid,),
             ).fetchall()
             if pos_rows:
@@ -1351,7 +1361,7 @@ def get_shift_list(conn=None):
                     "name": name,
                     "active_days": active_days,
                     "include_holidays": include_holidays,
-                    "positions": [{"name": p[0], "regular_only": bool(p[1]), "slot_count": int(p[2]), "time_window_name": (p[3] if len(p) > 3 and p[3] else None) or "", "required_skill": p[4] or "", "min_skill_level": int(p[5] or 0), "allowed_titles": json.loads(p[6] or "[]"), "max_per_week": int(p[7] or 0)} for p in pos_rows],
+                    "positions": [{"name": p[0], "regular_only": bool(p[1]), "slot_count": int(p[2]), "time_window_name": (p[3] if len(p) > 3 and p[3] else None) or "", "required_skill": p[4] or "", "min_skill_level": int(p[5] or 0), "allowed_titles": json.loads(p[6] or "[]"), "max_per_week": int(p[7] or 0), "active_weekdays": (p[8] if len(p) > 8 and p[8] else None) or None} for p in pos_rows],
                 })
             else:
                 result.append({
