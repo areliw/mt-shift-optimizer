@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from database import (
     init_master_db,
     create_workspace,
+    delete_workspace,
     get_workspace,
     list_workspaces,
     set_workspace_context,
@@ -730,6 +731,14 @@ def api_create_workspace(body: WorkspaceCreate = Body(WorkspaceCreate())):
 @app.get("/api/workspaces")
 def api_list_workspaces():
     return list_workspaces()
+
+
+@app.delete("/api/workspaces/{workspace_id}")
+def api_delete_workspace(workspace_id: str):
+    ok = delete_workspace(workspace_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return {"ok": True}
 
 
 # --- Landing page ---

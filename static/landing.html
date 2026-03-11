@@ -81,6 +81,12 @@
   .ws-name { font-weight: 500; }
   .ws-date { font-size: 0.8rem; color: #999; }
   .ws-arrow { color: #1a73e8; font-size: 1.2rem; }
+  .ws-delete {
+    background: none; border: none; color: #ccc; cursor: pointer;
+    font-size: 1.1rem; padding: 4px 8px; border-radius: 4px; transition: color 0.15s;
+  }
+  .ws-delete:hover { color: #e53935; }
+  .ws-right { display: flex; align-items: center; gap: 4px; }
   .empty-msg { color: #999; font-size: 0.9rem; padding: 12px 0; }
 </style>
 </head>
@@ -115,10 +121,29 @@ async function loadWorkspaces() {
     for (const ws of list) {
       const name = ws.name || ('Workspace ' + ws.id);
       const date = ws.created_at ? new Date(ws.created_at + 'Z').toLocaleDateString('th-TH') : '';
-      el.innerHTML += '<a class="ws-item" href="/w/' + ws.id + '/">' +
-        '<div><div class="ws-name">' + escHtml(name) + '</div>' +
-        '<div class="ws-date">' + date + '</div></div>' +
-        '<span class="ws-arrow">&rarr;</span></a>';
+      const item = document.createElement('div');
+      item.className = 'ws-item';
+      const link = document.createElement('a');
+      link.href = '/w/' + ws.id + '/';
+      link.style.cssText = 'text-decoration:none;color:inherit;flex:1';
+      link.innerHTML = '<div class="ws-name">' + escHtml(name) + '</div><div class="ws-date">' + date + '</div>';
+      const right = document.createElement('div');
+      right.className = 'ws-right';
+      const del = document.createElement('button');
+      del.className = 'ws-delete';
+      del.title = 'ลบ workspace';
+      del.textContent = '\u00d7';
+      del.onclick = function(e) { e.stopPropagation(); deleteWorkspace(ws.id, name); };
+      right.appendChild(del);
+      const arrow = document.createElement('a');
+      arrow.href = '/w/' + ws.id + '/';
+      arrow.className = 'ws-arrow';
+      arrow.style.cssText = 'text-decoration:none';
+      arrow.innerHTML = '&rarr;';
+      right.appendChild(arrow);
+      item.appendChild(link);
+      item.appendChild(right);
+      el.appendChild(item);
     }
   } catch(e) {
     document.getElementById('wsList').innerHTML = '<p class="empty-msg">โหลดไม่สำเร็จ</p>';
@@ -142,6 +167,17 @@ async function createWorkspace() {
     alert('สร้าง workspace ไม่สำเร็จ');
     btn.disabled = false;
     btn.textContent = 'สร้าง Workspace ใหม่';
+  }
+}
+
+async function deleteWorkspace(id, name) {
+  if (!confirm('ลบ workspace "' + name + '" ?\nข้อมูลทั้งหมดจะหายไป')) return;
+  try {
+    const r = await fetch('/api/workspaces/' + id, { method: 'DELETE' });
+    if (!r.ok) throw new Error(r.status);
+    loadWorkspaces();
+  } catch(e) {
+    alert('ลบไม่สำเร็จ');
   }
 }
 

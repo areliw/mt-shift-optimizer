@@ -111,6 +111,22 @@ def list_workspaces():
     return [{"id": r[0], "name": r[1], "created_at": r[2]} for r in rows]
 
 
+def delete_workspace(wid: str) -> bool:
+    """ลบ workspace: ลบ record จาก master DB + ลบไฟล์ DB"""
+    conn = _get_master_connection()
+    row = conn.execute("SELECT 1 FROM workspace WHERE id = ?", (wid,)).fetchone()
+    if not row:
+        conn.close()
+        return False
+    conn.execute("DELETE FROM workspace WHERE id = ?", (wid,))
+    conn.commit()
+    conn.close()
+    ws_path = WORKSPACES_DIR / f"{wid}.db"
+    if ws_path.exists():
+        os.remove(str(ws_path))
+    return True
+
+
 def set_workspace_context(wid: str):
     """ตั้ง workspace DB path ใน contextvar (ต้องเรียกจาก async context เพื่อ propagate ไปยัง sync threads)"""
     _workspace_db_path.set(str(WORKSPACES_DIR / f"{wid}.db"))
