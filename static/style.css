@@ -593,6 +593,18 @@ textarea:focus {
   color: var(--primary);
   border-bottom-color: var(--primary);
 }
+.cell-name-swap-pending {
+  background: #fef9c3;
+  color: #92400e;
+  border-bottom: 1.5px solid #f59e0b;
+  border-radius: 3px;
+  padding: 1px 4px;
+  animation: swap-pulse .8s ease-in-out infinite alternate;
+}
+@keyframes swap-pulse {
+  from { opacity: 1; }
+  to   { opacity: .55; }
+}
 span.slot-divider {
   color: #cbd5e1;
   font-weight: 300;

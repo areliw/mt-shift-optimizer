@@ -1031,6 +1031,55 @@ async function handleNameClick(span, staffList, runId, busyByDay) {
     return;
   }
 
+  // --- Swap mode ---
+  if (_swapPending) {
+    const src = _swapPending;
+    // คลิกที่สองบน slot เดิม → ยกเลิก
+    if (src.span === span) { _clearSwapPending(); return; }
+    // ยืนยัน swap
+    _clearSwapPending();
+    span.dataset.loading = "1";
+    src.span.dataset.loading = "1";
+    try {
+      const [r1, r2] = await Promise.all([
+        fetch(`${API}/schedule/${runId}/slot`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ day: src.day, shift_name: src.shiftName, position: src.position, slot_index: src.slotIndex, staff_name: currentName }),
+        }),
+        fetch(`${API}/schedule/${runId}/slot`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ day, shift_name: shiftName, position, slot_index: slotIndex, staff_name: src.staffName }),
+        }),
+      ]);
+      if (!r1.ok || !r2.ok) throw new Error("swap failed");
+      await refreshSchedule();
+    } catch (e) {
+      delete span.dataset.loading;
+      delete src.span.dataset.loading;
+      alert("สลับไม่สำเร็จ: " + e.message);
+    }
+    return;
+  }
+
+  // คลิกแรก → เข้า swap mode (ไม่เปิด dropdown ทันที)
+  _swapPending = { span, runId, day, shiftName, position, slotIndex, staffName: currentName };
+  span.classList.add("cell-name-swap-pending");
+  // ถ้าคลิกที่อื่น (ไม่ใช่ .cell-name) → ยกเลิก swap mode แล้วเปิด dropdown ปกติ
+  const onOutsideClick = (e) => {
+    if (e.target === span) return;
+    document.removeEventListener("click", onOutsideClick, true);
+    if (!_swapPending || _swapPending.span !== span) return;
+    if (e.target.classList && e.target.classList.contains("cell-name")) return; // handled by swap logic
+    _clearSwapPending();
+    // เปิด dropdown ปกติ
+    _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, position, slotIndex, currentName);
+  };
+  setTimeout(() => document.addEventListener("click", onOutsideClick, true), 0);
+}
+
+function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, position, slotIndex, currentName) {
   const select = document.createElement("select");
   select.className = "dummy-assign-select";
   const ph = document.createElement("option");
