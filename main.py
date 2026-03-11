@@ -5,13 +5,17 @@ import csv
 import sqlite3
 from pathlib import Path
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, APIRouter
 from fastapi.responses import HTMLResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from database import (
-    init_db,
+    init_master_db,
+    create_workspace,
+    get_workspace,
+    list_workspaces,
+    set_workspace_context,
     get_mt_list,
     get_shift_list,
     get_num_days,
@@ -57,9 +61,8 @@ from database import (
 from scheduler import generate_schedule, diagnose_infeasible, DUMMY_WORKER
 from ortools.sat.python import cp_model
 
-init_db()
-# ไม่เรียก clear_all() ตอน startup — ป้องกันล้างข้อมูลเมื่อ deploy (Railway/restart)
-# ถ้าต้องการล้างมือให้ใช้ปุ่มใน UI หรือเรียก API
+# Initialize master DB (workspace registry) + migrate old data
+init_master_db()
 
 app = FastAPI(title="MT Shift Optimizer")
 
@@ -67,6 +70,16 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+# --- Workspace dependency (async so contextvar propagates to sync endpoint threads) ---
+async def workspace_dep(workspace_id: str):
+    """FastAPI dependency: validate workspace and set DB context"""
+    ws = get_workspace(workspace_id)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    set_workspace_context(workspace_id)
+    return ws
 
 
 # --- Pydantic models ---
@@ -186,13 +199,23 @@ class SlotAssign(BaseModel):
     staff_name: str
 
 
+class WorkspaceCreate(BaseModel):
+    name: str = ""
+
+
+# ==========================================
+# Workspace-scoped router: /w/{workspace_id}/api/...
+# ==========================================
+ws_router = APIRouter(dependencies=[Depends(workspace_dep)])
+
+
 # --- API: Staff ---
-@app.get("/api/staff")
+@ws_router.get("/api/staff")
 def api_list_staff():
     return list_staff()
 
 
-@app.get("/api/staff/{staff_id:int}")
+@ws_router.get("/api/staff/{staff_id:int}")
 def api_get_staff(staff_id: int):
     staff = get_staff(staff_id)
     if staff is None:
@@ -200,12 +223,12 @@ def api_get_staff(staff_id: int):
     return staff
 
 
-@app.get("/api/time-windows")
+@ws_router.get("/api/time-windows")
 def api_list_time_windows():
     return list_time_window_catalog()
 
 
-@app.post("/api/time-windows")
+@ws_router.post("/api/time-windows")
 def api_add_time_window(body: TimeWindowCreate):
     name = (body.name or "").strip()
     start_time = (body.start_time or "").strip()
@@ -223,13 +246,13 @@ def api_add_time_window(body: TimeWindowCreate):
     return {"name": name, "start_time": start_time, "end_time": end_time}
 
 
-@app.delete("/api/time-windows/{name:path}")
+@ws_router.delete("/api/time-windows/{name:path}")
 def api_remove_time_window(name: str):
     remove_time_window_catalog(name)
     return {"ok": True}
 
 
-@app.post("/api/staff")
+@ws_router.post("/api/staff")
 def api_create_staff(body: StaffCreate):
     try:
         sid = create_staff(
@@ -252,7 +275,7 @@ def api_create_staff(body: StaffCreate):
     return {"id": sid, "name": body.name, "type": stype, "title": body.title or "", "off_days": body.off_days, "skills": body.skills}
 
 
-@app.put("/api/staff/{staff_id:int}")
+@ws_router.put("/api/staff/{staff_id:int}")
 def api_update_staff(staff_id: int, body: StaffUpdate):
     try:
         update_staff(
@@ -277,19 +300,19 @@ def api_update_staff(staff_id: int, body: StaffUpdate):
     return {"id": staff_id, "name": body.name, "type": stype, "title": body.title or "", "off_days": body.off_days, "skills": body.skills}
 
 
-@app.delete("/api/staff/{staff_id:int}")
-def api_delete_staff(staff_id: int): 
+@ws_router.delete("/api/staff/{staff_id:int}")
+def api_delete_staff(staff_id: int):
     delete_staff(staff_id)
     return {"ok": True}
 
 
 # --- API: Skills (รายการทักษะสำหรับใส่ให้บุคลากร) ---
-@app.get("/api/skills")
+@ws_router.get("/api/skills")
 def api_list_skills():
     return list_skill_catalog()
 
 
-@app.post("/api/skills")
+@ws_router.post("/api/skills")
 def api_add_skill(body: SkillCreate):
     name = (body.name or "").strip()
     if not name:
@@ -298,7 +321,7 @@ def api_add_skill(body: SkillCreate):
     return {"name": name}
 
 
-@app.put("/api/skills/{old_name}")
+@ws_router.put("/api/skills/{old_name}")
 def api_rename_skill(old_name: str, body: SkillCreate):
     old = (old_name or "").strip()
     new = (body.name or "").strip()
@@ -313,7 +336,7 @@ def api_rename_skill(old_name: str, body: SkillCreate):
     return {"name": new}
 
 
-@app.delete("/api/skills/{name}")
+@ws_router.delete("/api/skills/{name}")
 def api_remove_skill(name: str):
     remove_skill_catalog(name)
     return {"ok": True}
@@ -323,12 +346,12 @@ class SkillLevelsUpdate(BaseModel):
     levels: list[str]
 
 
-@app.get("/api/skills/{name}/levels")
+@ws_router.get("/api/skills/{name}/levels")
 def api_get_skill_levels(name: str):
     return get_skill_levels(name)
 
 
-@app.put("/api/skills/{name}/levels")
+@ws_router.put("/api/skills/{name}/levels")
 def api_set_skill_levels(name: str, body: SkillLevelsUpdate):
     labels = [l.strip() for l in body.levels if l.strip()]
     if not labels:
@@ -338,12 +361,12 @@ def api_set_skill_levels(name: str, body: SkillLevelsUpdate):
 
 
 # --- API: Titles (ฉายา/ตำแหน่ง รวมประเภท) ---
-@app.get("/api/titles")
+@ws_router.get("/api/titles")
 def api_list_titles():
     return list_title_catalog()
 
 
-@app.post("/api/titles")
+@ws_router.post("/api/titles")
 def api_add_title(body: TitleCreate):
     name = (body.name or "").strip()
     if not name:
@@ -358,19 +381,19 @@ def api_add_title(body: TitleCreate):
     return {"name": name, "type": stype}
 
 
-@app.delete("/api/titles/{name:path}")
+@ws_router.delete("/api/titles/{name:path}")
 def api_remove_title(name: str):
     remove_title_catalog(name)
     return {"ok": True}
 
 
 # --- API: Shifts ---
-@app.get("/api/shifts")
+@ws_router.get("/api/shifts")
 def api_list_shifts():
     return list_shifts()
 
 
-@app.post("/api/shifts")
+@ws_router.post("/api/shifts")
 def api_create_shift(body: ShiftCreate):
     positions = None
     if body.positions is not None:
@@ -388,7 +411,7 @@ def api_create_shift(body: ShiftCreate):
     return out
 
 
-@app.post("/api/shifts/from-template")
+@ws_router.post("/api/shifts/from-template")
 def api_create_shift_from_template(template: int = Query(..., ge=1, le=5), name: str | None = Query(None)):
     sid = create_shift_from_template(template, name_override=name)
     shifts = list_shifts()
@@ -396,7 +419,7 @@ def api_create_shift_from_template(template: int = Query(..., ge=1, le=5), name:
     return {"id": sid, "shift": created}
 
 
-@app.post("/api/apply-template")
+@ws_router.post("/api/apply-template")
 def api_apply_template(template: int = Query(..., ge=1, le=5)):
     """Apply template: creates shift(s) and staff (for templates that seed staff)."""
     apply_template(template)
@@ -410,14 +433,14 @@ def api_apply_template(template: int = Query(..., ge=1, le=5)):
     }
 
 
-@app.post("/api/clear-all")
+@ws_router.post("/api/clear-all")
 def api_clear_all():
     """ล้างทั้งหมด: บุคลากร, กะ, ตาราง — กลับเป็นหน้าว่าง"""
     clear_all()
     return {"ok": True}
 
 
-@app.put("/api/shifts/{shift_id:int}")
+@ws_router.put("/api/shifts/{shift_id:int}")
 def api_update_shift(shift_id: int, body: ShiftUpdate):
     positions = None
     if body.positions is not None:
@@ -435,14 +458,14 @@ def api_update_shift(shift_id: int, body: ShiftUpdate):
     return out
 
 
-@app.delete("/api/shifts/{shift_id:int}")
+@ws_router.delete("/api/shifts/{shift_id:int}")
 def api_delete_shift(shift_id: int):
     delete_shift(shift_id)
     return {"ok": True}
 
 
 # --- API: Settings ---
-@app.get("/api/settings")
+@ws_router.get("/api/settings")
 def api_get_settings():
     return {
         "num_days": get_num_days(),
@@ -451,18 +474,18 @@ def api_get_settings():
     }
 
 
-@app.get("/api/settings/num_days")
+@ws_router.get("/api/settings/num_days")
 def api_get_num_days():
     return {"value": get_num_days()}
 
 
-@app.put("/api/settings/num_days")
+@ws_router.put("/api/settings/num_days")
 def api_set_num_days(body: NumDaysUpdate):
     set_num_days(body.value)
     return {"value": body.value}
 
 
-@app.put("/api/settings")
+@ws_router.put("/api/settings")
 def api_set_settings(body: SettingsUpdate):
     if body.num_days is not None:
         set_num_days(body.num_days)
@@ -474,7 +497,7 @@ def api_set_settings(body: SettingsUpdate):
 
 
 # --- API: Schedule (run + get) ---
-@app.post("/api/schedule/run")
+@ws_router.post("/api/schedule/run")
 def api_run_schedule(
     body: ScheduleRunBody | None = Body(None),
     num_days_q: int | None = Query(None, alias="num_days"),
@@ -522,7 +545,7 @@ def api_run_schedule(
     return result
 
 
-@app.get("/api/schedule/latest")
+@ws_router.get("/api/schedule/latest")
 def api_get_latest_schedule():
     data = get_latest_schedule()
     if data is None:
@@ -530,7 +553,7 @@ def api_get_latest_schedule():
     return data
 
 
-@app.get("/api/schedule/{run_id:int}")
+@ws_router.get("/api/schedule/{run_id:int}")
 def api_get_schedule(run_id: int):
     data = get_schedule(run_id)
     if data is None:
@@ -539,7 +562,7 @@ def api_get_schedule(run_id: int):
 
 
 # --- Export CSV ---
-@app.get("/api/schedule/export/csv")
+@ws_router.get("/api/schedule/export/csv")
 def api_export_schedule_csv(run_id: int | None = None):
     from datetime import datetime, timedelta
     if run_id is not None:
@@ -587,7 +610,7 @@ def api_export_schedule_csv(run_id: int | None = None):
 
 
 # --- Manual Slot Assignment ---
-@app.patch("/api/schedule/{run_id:int}/slot")
+@ws_router.patch("/api/schedule/{run_id:int}/slot")
 def api_assign_slot(run_id: int, body: SlotAssign):
     """Manual override: กำหนด staff ให้ slot ที่ระบุ (ใช้แทน dummy หรือสลับคน)"""
     data = get_schedule(run_id)
@@ -605,12 +628,12 @@ def api_assign_slot(run_id: int, body: SlotAssign):
 
 
 # --- API: Staff Pairs ---
-@app.get("/api/staff-pairs")
+@ws_router.get("/api/staff-pairs")
 def api_list_staff_pairs():
     return list_staff_pairs()
 
 
-@app.post("/api/staff-pairs")
+@ws_router.post("/api/staff-pairs")
 def api_add_staff_pair(body: StaffPairCreate):
     if body.staff_id_1 == body.staff_id_2:
         raise HTTPException(status_code=400, detail="ต้องเลือกคนละคน")
@@ -620,7 +643,7 @@ def api_add_staff_pair(body: StaffPairCreate):
     return {"ok": True}
 
 
-@app.post("/api/staff-pairs/batch")
+@ws_router.post("/api/staff-pairs/batch")
 def api_add_staff_pairs_batch(body: list[StaffPairBatchItem]):
     """เพิ่มหลายคู่พร้อมกัน รองรับ name_1, name_2 (ชื่อบุคลากร)"""
     from database import list_staff
@@ -654,40 +677,73 @@ def api_add_staff_pairs_batch(body: list[StaffPairBatchItem]):
     return {"ok": True, "added": added}
 
 
-@app.delete("/api/staff-pairs/{pair_id:int}")
+@ws_router.delete("/api/staff-pairs/{pair_id:int}")
 def api_remove_staff_pair(pair_id: int):
     remove_staff_pair(pair_id)
     return {"ok": True}
 
 
 # --- API: Import/Export ---
-@app.get("/api/export")
+@ws_router.get("/api/export")
 def api_export():
     return export_all_data()
 
 
-@app.post("/api/import")
+@ws_router.post("/api/import")
 def api_import(data: dict = Body(...)):
     import_all_data(data)
     return {"ok": True}
 
 
-# --- Frontend: serve index ---
-@app.get("/staff", response_class=HTMLResponse)
+# --- Frontend: serve index.html inside workspace ---
+@ws_router.get("/staff", response_class=HTMLResponse)
 def staff_page():
-    """หน้ารายละเอียดบุคลากร (ใช้ query ?id=...)"""
     staff_html = STATIC_DIR / "staff.html"
     if staff_html.exists():
         return FileResponse(staff_html)
     return HTMLResponse("<h1>Staff</h1><p>Add static/staff.html for the staff detail page.</p>")
 
 
-@app.get("/", response_class=HTMLResponse)
-def index():
+@ws_router.get("/", response_class=HTMLResponse)
+def workspace_index():
     index_html = STATIC_DIR / "index.html"
     if index_html.exists():
         return FileResponse(index_html)
     return HTMLResponse("<h1>MT Shift Optimizer</h1><p>Add static/index.html for the UI.</p>")
+
+
+# Mount workspace router
+app.include_router(ws_router, prefix="/w/{workspace_id}")
+
+
+# ==========================================
+# Global routes (not workspace-scoped)
+# ==========================================
+
+# --- Workspace management API ---
+@app.post("/api/workspaces")
+def api_create_workspace(body: WorkspaceCreate = Body(WorkspaceCreate())):
+    wid = create_workspace(body.name)
+    return {"id": wid, "url": f"/w/{wid}/"}
+
+
+@app.get("/api/workspaces")
+def api_list_workspaces():
+    return list_workspaces()
+
+
+# --- Landing page ---
+@app.get("/", response_class=HTMLResponse)
+def landing():
+    landing_html = STATIC_DIR / "landing.html"
+    if landing_html.exists():
+        return FileResponse(landing_html)
+    # Fallback: redirect to first workspace if exists, or show basic HTML
+    workspaces = list_workspaces()
+    if workspaces:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=f"/w/{workspaces[0]['id']}/")
+    return HTMLResponse("<h1>MT Shift Optimizer</h1><p>No workspaces yet.</p>")
 
 
 if __name__ == "__main__":

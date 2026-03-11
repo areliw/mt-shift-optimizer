@@ -1,4 +1,6 @@
-const API = "/api";
+const _pathParts = window.location.pathname.split('/');
+const WORKSPACE_ID = (_pathParts[1] === 'w' && _pathParts[2]) ? _pathParts[2] : '';
+const API = WORKSPACE_ID ? "/w/" + WORKSPACE_ID + "/api" : "/api";
 const DAY_NAMES = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"];
 
 function escapeHtml(s) {

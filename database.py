@@ -1,9 +1,12 @@
 # database.py — แยกข้อมูล staff / กะ / settings ไว้ใน SQLite
 
+import contextvars
 import json
 import os
 import re
+import shutil
 import sqlite3
+import uuid
 from pathlib import Path
 
 # ให้แต่ละเครื่อง (แต่ละ deploy) ใช้ DB คนละไฟล์ได้
@@ -18,6 +21,99 @@ elif os.environ.get("INSTANCE_ID"):
 else:
     DB_PATH = _base / "shift_optimizer.db"
 ROOMS = ("donor", "xmatch")
+
+# --- Workspace isolation: แต่ละ workspace ใช้ DB file แยก ---
+WORKSPACES_DIR = _base / "workspaces"
+MASTER_DB_PATH = _base / "master.db"
+
+# Context variable: ถูก set โดย async FastAPI dependency → propagate ไปยัง sync endpoints
+_workspace_db_path: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "workspace_db_path", default=None
+)
+
+
+def _get_master_connection():
+    return sqlite3.connect(str(MASTER_DB_PATH))
+
+
+def init_master_db():
+    """สร้าง master DB สำหรับ workspace metadata + migrate ข้อมูลเก่าถ้ามี"""
+    WORKSPACES_DIR.mkdir(exist_ok=True)
+    conn = _get_master_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS workspace (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.commit()
+    # Migrate: ถ้ามี shift_optimizer.db เก่าที่มีข้อมูล → สร้าง workspace แรกจากมัน
+    if DB_PATH.exists() and DB_PATH.stat().st_size > 0:
+        has_ws = conn.execute("SELECT 1 FROM workspace LIMIT 1").fetchone()
+        if not has_ws:
+            # เช็คว่า DB เก่ามีข้อมูลจริง (มี staff หรือ shift)
+            try:
+                old_conn = sqlite3.connect(str(DB_PATH))
+                has_data = old_conn.execute(
+                    "SELECT 1 FROM staff LIMIT 1"
+                ).fetchone() or old_conn.execute(
+                    "SELECT 1 FROM shift LIMIT 1"
+                ).fetchone()
+                old_conn.close()
+            except Exception:
+                has_data = False
+            if has_data:
+                wid = uuid.uuid4().hex[:8]
+                conn.execute(
+                    "INSERT INTO workspace (id, name) VALUES (?, ?)",
+                    (wid, "ข้อมูลเดิม"),
+                )
+                conn.commit()
+                shutil.copy2(str(DB_PATH), str(WORKSPACES_DIR / f"{wid}.db"))
+    conn.close()
+
+
+def create_workspace(name: str = "") -> str:
+    """สร้าง workspace ใหม่ คืน workspace id"""
+    wid = uuid.uuid4().hex[:8]
+    conn = _get_master_connection()
+    conn.execute("INSERT INTO workspace (id, name) VALUES (?, ?)", (wid, name or ""))
+    conn.commit()
+    conn.close()
+    # Initialize workspace DB (สร้างตารางทั้งหมด)
+    ws_path = WORKSPACES_DIR / f"{wid}.db"
+    ws_conn = sqlite3.connect(str(ws_path))
+    init_db(conn=ws_conn)
+    ws_conn.close()
+    return wid
+
+
+def get_workspace(wid: str):
+    """คืน workspace dict หรือ None"""
+    conn = _get_master_connection()
+    row = conn.execute(
+        "SELECT id, name, created_at FROM workspace WHERE id = ?", (wid,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"id": row[0], "name": row[1], "created_at": row[2]}
+
+
+def list_workspaces():
+    """คืนรายการ workspace ทั้งหมด"""
+    conn = _get_master_connection()
+    rows = conn.execute(
+        "SELECT id, name, created_at FROM workspace ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [{"id": r[0], "name": r[1], "created_at": r[2]} for r in rows]
+
+
+def set_workspace_context(wid: str):
+    """ตั้ง workspace DB path ใน contextvar (ต้องเรียกจาก async context เพื่อ propagate ไปยัง sync threads)"""
+    _workspace_db_path.set(str(WORKSPACES_DIR / f"{wid}.db"))
 
 
 def _migrate_shifts_to_positions(conn):
@@ -70,7 +166,10 @@ def _migrate_schedule_slot_to_position_pk(conn):
 
 
 def get_connection():
-    return sqlite3.connect(DB_PATH)
+    ws_path = _workspace_db_path.get()
+    if ws_path is not None:
+        return sqlite3.connect(ws_path)
+    return sqlite3.connect(str(DB_PATH))
 
 
 def init_db(conn=None):

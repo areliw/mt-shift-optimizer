@@ -1,4 +1,7 @@
-const API = "/api";
+// Extract workspace ID from URL: /w/{workspace_id}/...
+const _pathParts = window.location.pathname.split('/');
+const WORKSPACE_ID = (_pathParts[1] === 'w' && _pathParts[2]) ? _pathParts[2] : '';
+const API = WORKSPACE_ID ? "/w/" + WORKSPACE_ID + "/api" : "/api";
 
 const THAI_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 
