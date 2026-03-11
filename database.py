@@ -4,6 +4,7 @@ import contextvars
 import json
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import uuid
@@ -50,10 +51,24 @@ def init_master_db():
         CREATE TABLE IF NOT EXISTS workspace (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL DEFAULT '',
+            access_token TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
     conn.commit()
+    # Migrate: เพิ่มคอลัมน์ access_token ให้ตารางเก่า
+    try:
+        conn.execute("ALTER TABLE workspace ADD COLUMN access_token TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # คอลัมน์มีอยู่แล้ว
+    # สร้าง token ให้ workspace เก่าที่ยังไม่มี
+    rows = conn.execute("SELECT id FROM workspace WHERE access_token = ''").fetchall()
+    for (wid,) in rows:
+        tok = secrets.token_hex(16)
+        conn.execute("UPDATE workspace SET access_token = ? WHERE id = ?", (tok, wid))
+    if rows:
+        conn.commit()
     # Migrate: ถ้ามี shift_optimizer.db เก่าที่มีข้อมูล → สร้าง workspace แรกจากมัน
     if DB_PATH.exists() and DB_PATH.stat().st_size > 0:
         has_ws = conn.execute("SELECT 1 FROM workspace LIMIT 1").fetchone()
@@ -80,11 +95,12 @@ def init_master_db():
     conn.close()
 
 
-def create_workspace(name: str = "") -> str:
-    """สร้าง workspace ใหม่ คืน workspace id"""
+def create_workspace(name: str = "") -> tuple[str, str]:
+    """สร้าง workspace ใหม่ คืน (workspace_id, access_token)"""
     wid = uuid.uuid4().hex[:8]
+    token = secrets.token_hex(16)  # 32-char hex = 128-bit entropy
     conn = _get_master_connection()
-    conn.execute("INSERT INTO workspace (id, name) VALUES (?, ?)", (wid, name or ""))
+    conn.execute("INSERT INTO workspace (id, name, access_token) VALUES (?, ?, ?)", (wid, name or "", token))
     conn.commit()
     conn.close()
     # Initialize workspace DB (สร้างตารางทั้งหมด)
@@ -92,11 +108,29 @@ def create_workspace(name: str = "") -> str:
     ws_conn = sqlite3.connect(str(ws_path))
     init_db(conn=ws_conn)
     ws_conn.close()
-    return wid
+    return wid, token
+
+
+def verify_workspace_token(wid: str, token: str) -> bool:
+    """ตรวจ token สำหรับ workspace ที่ระบุ — constant-time compare"""
+    try:
+        _validate_workspace_id(wid)
+    except ValueError:
+        return False
+    conn = _get_master_connection()
+    row = conn.execute("SELECT access_token FROM workspace WHERE id = ?", (wid,)).fetchone()
+    conn.close()
+    if not row:
+        return False
+    stored = row[0] or ""
+    # workspace มี token ว่าง (ข้อมูลเก่าก่อน migrate) → อนุญาตเข้าได้เสมอ
+    if not stored:
+        return True
+    return secrets.compare_digest(stored, token)
 
 
 def get_workspace(wid: str):
-    """คืน workspace dict หรือ None"""
+    """คืน workspace dict (ไม่มี token) หรือ None"""
     try:
         _validate_workspace_id(wid)
     except ValueError:

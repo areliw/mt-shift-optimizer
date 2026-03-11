@@ -32,6 +32,7 @@ from database import (
     get_workspace,
     list_workspaces,
     set_workspace_context,
+    verify_workspace_token,
     get_mt_list,
     get_shift_list,
     get_num_days,
@@ -174,11 +175,14 @@ if STATIC_DIR.exists():
 
 
 # --- Workspace dependency (async so contextvar propagates to sync endpoint threads) ---
-async def workspace_dep(workspace_id: str):
-    """FastAPI dependency: validate workspace and set DB context"""
+async def workspace_dep(workspace_id: str, x_workspace_token: str | None = Header(default=None)):
+    """FastAPI dependency: validate workspace exists AND token matches"""
     ws = get_workspace(workspace_id)
     if ws is None:
         raise HTTPException(status_code=404, detail="Workspace not found")
+    if not verify_workspace_token(workspace_id, x_workspace_token or ""):
+        logger.warning("Rejected workspace access: id=%s invalid token", workspace_id)
+        raise HTTPException(status_code=403, detail="Invalid or missing workspace token")
     set_workspace_context(workspace_id)
     return ws
 
@@ -899,9 +903,9 @@ app.include_router(ws_router, prefix="/w/{workspace_id}")
 # --- Workspace management API ---
 @app.post("/api/workspaces", dependencies=[Depends(verify_api_key)])
 def api_create_workspace(body: WorkspaceCreate = Body(WorkspaceCreate())):
-    wid = create_workspace(body.name)
+    wid, token = create_workspace(body.name)
     logger.info("Created workspace id=%s name=%r", wid, body.name)
-    return {"id": wid, "url": f"/w/{wid}/"}
+    return {"id": wid, "token": token, "url": f"/w/{wid}/"}
 
 
 @app.get("/api/workspaces", dependencies=[Depends(verify_api_key)])

@@ -1,6 +1,25 @@
 const _pathParts = window.location.pathname.split('/');
 const WORKSPACE_ID = (_pathParts[1] === 'w' && _pathParts[2]) ? _pathParts[2] : '';
 const API = WORKSPACE_ID ? "/w/" + WORKSPACE_ID + "/api" : "/api";
+
+// Inject X-Workspace-Token on every request to this workspace
+(function() {
+  const _WS_PREFIX = WORKSPACE_ID ? '/w/' + WORKSPACE_ID + '/' : null;
+  const _wsToken = (() => {
+    try { return JSON.parse(localStorage.getItem('ws_tokens') || '{}')[WORKSPACE_ID] || ''; }
+    catch { return ''; }
+  })();
+  if (!_WS_PREFIX || !_wsToken) return;
+  const _origFetch = window.fetch.bind(window);
+  window.fetch = function(url, opts) {
+    opts = Object.assign({}, opts);
+    const urlStr = typeof url === 'string' ? url : (url && url.url) || '';
+    if (urlStr.startsWith(_WS_PREFIX) || urlStr.startsWith('/w/' + WORKSPACE_ID + '/api')) {
+      opts.headers = Object.assign({'X-Workspace-Token': _wsToken}, opts.headers || {});
+    }
+    return _origFetch(url, opts);
+  };
+})();
 const DAY_NAMES = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"];
 
 function escapeHtml(s) {

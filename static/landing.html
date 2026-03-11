@@ -108,17 +108,24 @@
 </div>
 
 <script>
+// ws_tokens: { workspaceId: token, ... } stored per browser
+function _getTokens() { try { return JSON.parse(localStorage.getItem('ws_tokens') || '{}'); } catch { return {}; } }
+function _saveTokens(t) { localStorage.setItem('ws_tokens', JSON.stringify(t)); }
+
 async function loadWorkspaces() {
   try {
     const r = await fetch('/api/workspaces');
     const list = await r.json();
+    const tokens = _getTokens();
+    // แสดงเฉพาะ workspace ที่เครื่องนี้มี token
+    const mine = list.filter(ws => tokens[ws.id] !== undefined);
     const el = document.getElementById('wsList');
-    if (!list.length) {
-      el.innerHTML = '<p class="empty-msg">ยังไม่มี workspace — สร้างใหม่ได้เลย</p>';
+    if (!mine.length) {
+      el.innerHTML = '<p class="empty-msg">ยังไม่มี workspace ในเครื่องนี้ — สร้างใหม่ได้เลย</p>';
       return;
     }
-    el.innerHTML = '<h3>Workspace ที่มีอยู่</h3>';
-    for (const ws of list) {
+    el.innerHTML = '<h3>Workspace ของเครื่องนี้</h3>';
+    for (const ws of mine) {
       const name = ws.name || ('Workspace ' + ws.id);
       const date = ws.created_at ? new Date(ws.created_at + 'Z').toLocaleDateString('th-TH') : '';
       const item = document.createElement('div');
@@ -133,7 +140,7 @@ async function loadWorkspaces() {
       del.className = 'ws-delete';
       del.title = 'ลบ workspace';
       del.textContent = '\u00d7';
-      del.onclick = function(e) { e.stopPropagation(); deleteWorkspace(ws.id, name); };
+      del.onclick = function(e) { e.stopPropagation(); deleteWorkspace(ws.id, name, tokens[ws.id]); };
       right.appendChild(del);
       const arrow = document.createElement('a');
       arrow.href = '/w/' + ws.id + '/';
@@ -162,6 +169,10 @@ async function createWorkspace() {
       body: JSON.stringify({name: nameInput.value.trim()})
     });
     const data = await r.json();
+    // บันทึก token ลง localStorage ของเครื่องนี้
+    const tokens = _getTokens();
+    tokens[data.id] = data.token;
+    _saveTokens(tokens);
     window.location.href = data.url;
   } catch(e) {
     alert('สร้าง workspace ไม่สำเร็จ');
@@ -170,11 +181,18 @@ async function createWorkspace() {
   }
 }
 
-async function deleteWorkspace(id, name) {
+async function deleteWorkspace(id, name, token) {
   if (!confirm('ลบ workspace "' + name + '" ?\nข้อมูลทั้งหมดจะหายไป')) return;
   try {
-    const r = await fetch('/api/workspaces/' + id, { method: 'DELETE' });
+    const r = await fetch('/api/workspaces/' + id, {
+      method: 'DELETE',
+      headers: {'X-Workspace-Token': token || ''}
+    });
     if (!r.ok) throw new Error(r.status);
+    // ลบ token ออกจาก localStorage ด้วย
+    const tokens = _getTokens();
+    delete tokens[id];
+    _saveTokens(tokens);
     loadWorkspaces();
   } catch(e) {
     alert('ลบไม่สำเร็จ');
