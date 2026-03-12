@@ -211,31 +211,60 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
             f"รวม min ของทุกคน = {sum_min} แต่มี slot ทั้งหมดแค่ {total_slots} — ลด min บางคน"
         )
 
-    # 2) แต่ละคน: min เกิน slot ที่จะลงได้ (ทักษะ/ช่วงเวลา/วันหยุด) หรือเกินขีดจำกัดจาก min_gap
+    # 2) แต่ละคน: min เกิน slot/วันที่ลงได้จริง (ทักษะ/ช่วงเวลา/วันหยุด/1-shift-per-day)
     for mt in mt_list:
         mn = int(mt.get("min_shifts_per_month") or 0)
-        if mn <= 0:
-            continue
-        can_work = sum(
+        mx = mt.get("max_shifts_per_month")
+        mx = int(mx) if mx else None
+
+        # นับ slot ที่ลงได้ (ไม่จำกัด 1/วัน)
+        can_work_slots = sum(
             1 for day in range(num_days)
             for shift, pos, pos_name, slot_i in expanded
             if _is_slot_active_on_day(shift, pos, day, start_date, holiday_set)
             and available_on_day(mt, day)
             and _staff_can_work_position(mt, pos, catalog)
         )
+        # นับวันที่มี slot ลงได้อย่างน้อย 1 (จำกัด 1 shift/วัน)
+        available_days = sum(
+            1 for day in range(num_days)
+            if available_on_day(mt, day)
+            and any(
+                _is_slot_active_on_day(shift, pos, day, start_date, holiday_set)
+                and _staff_can_work_position(mt, pos, catalog)
+                for shift, pos, pos_name, slot_i in expanded
+            )
+        )
+
         # min_gap_days: ห่างกัน g วัน → ใน num_days ทำได้มากสุด ~num_days/(g+1) วัน
         gap = int(mt.get("min_gap_days") or 0)
-        max_from_gap = (num_days // (gap + 1)) if gap > 0 else total_slots + 1
-        if gap > 0 and max_from_gap < mn:
+        max_from_gap = (num_days // (gap + 1)) if gap > 0 else num_days + 1
+
+        effective_max = available_days
+        if gap > 0:
+            effective_max = min(effective_max, max_from_gap)
+
+        if mn > 0 and mn > effective_max:
+            parts = [f"'{mt['name']}' ตั้ง min {mn}"]
+            if available_days < mn:
+                parts.append(f"แต่มีวันที่ลงได้แค่ {available_days} วัน (ลง 1 เวร/วัน)")
+            if gap > 0 and max_from_gap < mn:
+                parts.append(f"min_gap {gap} วัน จำกัดเหลือ ~{max_from_gap} เวร")
+            parts.append("→ ลด min หรือเพิ่มวัน/ทักษะ/ช่วงเวลา")
+            reasons.append(" ".join(parts))
+        elif mn > 0 and can_work_slots == 0:
             reasons.append(
-                f"'{mt['name']}' ตั้ง min {mn} แต่มี min_gap {gap} วัน → ใน {num_days} วันทำได้มากสุด ~{max_from_gap} วัน — ลด min หรือปรับ min_gap"
+                f"'{mt['name']}' ตั้ง min {mn} แต่ไม่มี slot ที่ลงได้เลย (ไม่มีทักษะ/ช่วงเวลาตรง) — ตั้ง min=0 หรือเพิ่มทักษะ"
             )
-        elif can_work < mn:
-            hint = "ลด min หรือเพิ่มทักษะ/ช่วงเวลา/วันหยุดที่อยู่ได้"
-            if can_work == 0:
-                hint += " (หรือตั้ง min=0 ถ้าต้องการวางคนไว้ก่อน)"
+        elif mn > 0 and can_work_slots < mn:
             reasons.append(
-                f"'{mt['name']}' ตั้ง min {mn} แต่มี slot ที่คนนี้ลงได้แค่ {can_work} — {hint}"
+                f"'{mt['name']}' ตั้ง min {mn} แต่มี slot ที่ลงได้แค่ {can_work_slots} — ลด min หรือเพิ่มทักษะ/ช่วงเวลา"
+            )
+
+        # max < min
+        if mx is not None and mn > 0 and mx < mn:
+            reasons.append(
+                f"'{mt['name']}' ตั้ง max {mx} < min {mn} — ขัดแย้งกัน"
             )
 
     # 3) ตำแหน่งต้องการทักษะแต่ไม่มีใครมี
@@ -289,27 +318,35 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
                         f"ตำแหน่ง '{pos_name}' กำหนดเต็มเวลาเท่านั้น แต่มีคนเต็มเวลาแค่ {n_fulltime} คน (ต้องการ {slot_count} คน/วัน)"
                     )
 
-    # Fallback: ตรวจ min vs can_work อีกครั้ง (กรณีพลาดจากเงื่อนไขอื่น)
-    if not reasons:
-        for mt in mt_list:
-            mn = int(mt.get("min_shifts_per_month") or 0)
-            if mn <= 0:
-                continue
-            can_work = sum(
-                1 for day in range(num_days)
-                for shift, pos, pos_name, slot_i in expanded
-                if _is_slot_active_on_day(shift, pos, day, start_date, holiday_set)
-                and available_on_day(mt, day)
+    # 7) สรุปรายคน: min vs วันที่ลงได้ (เพื่อช่วย debug)
+    staff_summary = []
+    for mt in mt_list:
+        mn = int(mt.get("min_shifts_per_month") or 0)
+        mx = mt.get("max_shifts_per_month")
+        mx = int(mx) if mx else None
+        avail = sum(1 for day in range(num_days) if available_on_day(mt, day))
+        workable_days = sum(
+            1 for day in range(num_days)
+            if available_on_day(mt, day)
+            and any(
+                _is_slot_active_on_day(shift, pos, day, start_date, holiday_set)
                 and _staff_can_work_position(mt, pos, catalog)
+                for shift, pos, pos_name, slot_i in expanded
             )
-            if can_work < mn:
-                reasons.append(
-                    f"'{mt['name']}' ตั้ง min {mn} แต่มี slot ที่ลงได้แค่ {can_work} — ลด min หรือเพิ่มทักษะ/ช่วงเวลา/วันทำงาน"
-                )
-                break  # เจออย่างน้อย 1 คนพอ
+        )
+        status = "OK"
+        if mn > 0 and mn > workable_days:
+            status = f"NG (min {mn} > ลงได้ {workable_days} วัน)"
+        elif mn > 0 and workable_days - mn <= 2:
+            status = f"ตึง (min {mn}, ลงได้ {workable_days} วัน, เหลือแค่ {workable_days - mn})"
+        max_str = f"/{mx}" if mx else ""
+        staff_summary.append(f"  {mt['name']}: min={mn}{max_str}, ว่าง {avail} วัน, ลงเวรได้ {workable_days} วัน — {status}")
 
-    if not reasons:
-        reasons.append("ตัวแก้ไม่พบสาเหตุชัดเจน — ลองลด min เวรของคนที่อยู่มากที่สุด 2–3 คน รวมลงมาประมาณ 5 เวร ให้ตารางออกก่อน แล้วค่อยปรับจูนทีหลัง")
+    if staff_summary:
+        reasons.append("--- สรุปรายคน ---\n" + "\n".join(staff_summary))
+
+    if len(reasons) == 1 and reasons[0].startswith("--- สรุป"):
+        reasons.insert(0, "ไม่พบปัญหาชัดเจน — ลองลด min เวรของคนที่ตึงที่สุด 2-3 คน ให้ตารางออกก่อน แล้วค่อยปรับจูน")
     return reasons
 
 
@@ -610,13 +647,9 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
                     if n2_in_shift and n1_in_shift:
                         model.add(sum(n2_in_shift) <= sum(n1_in_shift))
 
-    # --- Max consecutive working days (default 5) ---
-    MAX_CONSECUTIVE = 5
+    # --- Soft penalty for consecutive working days (no hard limit) ---
     consecutive_penalty_terms = []
     for mt in mt_list:
-        for start_day in range(num_days - MAX_CONSECUTIVE):
-            window = [has_work[(mt["name"], start_day + d)] for d in range(MAX_CONSECUTIVE + 1)]
-            model.add(sum(window) <= MAX_CONSECUTIVE)
         # Soft penalty for 3+ consecutive days
         for start_day in range(num_days - 2):
             end_day = min(start_day + 3, num_days)
