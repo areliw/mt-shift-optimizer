@@ -93,7 +93,7 @@
 <body>
 <div class="container">
   <h1>MT Shift Optimizer</h1>
-  <p class="subtitle">ระบบจัดเวรอัตโนมัติ สำหรับแผนก MT</p>
+  <p class="subtitle">ระบบจัดเวรอัตโนมัติ สำหรับแผนก MT<br><small style="font-size:0.82rem;color:#999">ทุกคนจะเห็น workspace ของคุณ แต่จะไม่เห็นเนื้อหาข้างใน</small></p>
 
   <div class="create-section">
     <input type="text" id="wsName" placeholder="ชื่อ workspace (เช่น รพ.ของฉัน)" maxlength="100">
@@ -149,12 +149,6 @@ async function loadWorkspaces() {
       link.innerHTML = '<div class="ws-name">' + escHtml(name) + '</div><div class="ws-date">' + date + '</div>';
       const right = document.createElement('div');
       right.className = 'ws-right';
-      const del = document.createElement('button');
-      del.className = 'ws-delete';
-      del.title = 'ลบ workspace';
-      del.textContent = '\u00d7';
-      del.onclick = function(e) { e.stopPropagation(); deleteWorkspace(ws.id, name, tok); };
-      right.appendChild(del);
       const arrow = document.createElement('a');
       arrow.href = href;
       arrow.className = 'ws-arrow';

@@ -619,7 +619,7 @@ def api_create_shift_from_template(template: int = Query(..., ge=1, le=5), name:
 
 
 @ws_router.post("/api/apply-template")
-def api_apply_template(template: int = Query(..., ge=1, le=5)):
+def api_apply_template(template: int = Query(..., ge=1, le=6)):
     """Apply template: creates shift(s) and staff (for templates that seed staff)."""
     apply_template(template)
     staff = list_staff()

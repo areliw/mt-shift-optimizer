@@ -2029,6 +2029,7 @@ async function applyTemplate(templateId) {
 document.getElementById("template_1").addEventListener("click", () => applyTemplate(1));
 document.getElementById("template_2").addEventListener("click", () => applyTemplate(2));
 document.getElementById("template_5").addEventListener("click", () => applyTemplate(5));
+document.getElementById("template_6").addEventListener("click", () => applyTemplate(6));
 document.getElementById("template_3").addEventListener("click", () => applyTemplate(3));
 document.getElementById("template_4").addEventListener("click", () => applyTemplate(4));
 

@@ -1897,6 +1897,106 @@ def _default_shift_name_for_template(template_id: int) -> str:
 
 _TEMPLATE_2_SHIFT_NAMES = ["เวรเช้า Micro", "เวรบ่าย Micro", "เวรดึก Micro"]
 
+_TEMPLATE_6_DATA = {
+    "settings": {
+        "holiday_dates": "2026-04-06,2026-04-13,2026-04-14,2026-04-15",
+        "num_days": "30",
+        "schedule_start_date": "2026-04-01",
+    },
+    "skills": [
+        {"name": "SDP", "levels": [{"level": 1, "label": "1"}]},
+        {"name": "X-match", "levels": [{"level": 1, "label": "1"}]},
+        {"name": "คัดแยกแลป", "levels": [{"level": 1, "label": "1"}]},
+        {"name": "จ่ายเลือด", "levels": [{"level": 1, "label": "1"}]},
+        {"name": "ประสานงาน (ผู้ตรวจการ)", "levels": [{"level": 1, "label": "1"}]},
+        {"name": "ปั่น", "levels": [{"level": 1, "label": "1"}]},
+        {"name": "รับบริจาค", "levels": [{"level": 1, "label": "1"}, {"level": 2, "label": "2"}]},
+        {"name": "ลงเอกสารคุณภาพห้องคัดกรอง", "levels": [{"level": 1, "label": "1"}, {"level": 2, "label": "2"}]},
+        {"name": "สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น", "levels": [{"level": 1, "label": "1"}, {"level": 2, "label": "2"}]},
+        {"name": "เช็ค + รับบริจาค", "levels": [{"level": 1, "label": "1"}, {"level": 2, "label": "2"}]},
+    ],
+    "titles": [
+        {"name": "Full Time", "type": "fulltime"},
+        {"name": "Part Time", "type": "parttime"},
+    ],
+    "time_windows": [
+        {"name": "00:00-08:00", "start_time": "00:00", "end_time": "08:00"},
+        {"name": "08:00-16:00", "start_time": "08:00", "end_time": "16:00"},
+        {"name": "16:00-24:00", "start_time": "16:00", "end_time": "24:00"},
+    ],
+    "staff": [
+        {"name": "PT 1", "type": "parttime", "title": "Part Time", "off_days": [], "off_days_of_month": [3,4,5,6,7], "skills": ["X-match","จ่ายเลือด"], "skill_levels": {"X-match":1,"จ่ายเลือด":1}, "time_windows": ["00:00-08:00","08:00-16:00","16:00-24:00"], "min_shifts_per_month": 5, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "MT 1", "type": "fulltime", "title": "Full Time", "off_days": [], "off_days_of_month": [3,4,5,6,7], "skills": ["X-match","คัดแยกแลป","จ่ายเลือด","ประสานงาน (ผู้ตรวจการ)"], "skill_levels": {"X-match":1,"คัดแยกแลป":1,"จ่ายเลือด":1,"ประสานงาน (ผู้ตรวจการ)":1}, "time_windows": ["00:00-08:00","08:00-16:00","16:00-24:00"], "min_shifts_per_month": 17, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "MT 2", "type": "fulltime", "title": "Full Time", "off_days": [], "off_days_of_month": [5,6], "skills": ["SDP","X-match","จ่ายเลือด","ประสานงาน (ผู้ตรวจการ)","ปั่น","รับบริจาค","ลงเอกสารคุณภาพห้องคัดกรอง","สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น","เช็ค + รับบริจาค"], "skill_levels": {"SDP":1,"X-match":1,"จ่ายเลือด":1,"ประสานงาน (ผู้ตรวจการ)":1,"ปั่น":1,"รับบริจาค":1,"ลงเอกสารคุณภาพห้องคัดกรอง":1,"สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น":1,"เช็ค + รับบริจาค":1}, "time_windows": ["00:00-08:00","08:00-16:00","16:00-24:00"], "min_shifts_per_month": 24, "max_shifts_per_month": 24, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "PT 2", "type": "parttime", "title": "Part Time", "off_days": [], "off_days_of_month": [17,18,19,20,21,22,23,24,25], "skills": ["X-match","จ่ายเลือด"], "skill_levels": {"X-match":1,"จ่ายเลือด":1}, "time_windows": ["00:00-08:00","08:00-16:00","16:00-24:00"], "min_shifts_per_month": 10, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "MT 3", "type": "fulltime", "title": "Full Time", "off_days": [], "off_days_of_month": [3,4,5,6,7], "skills": ["X-match","จ่ายเลือด","ปั่น","รับบริจาค","ลงเอกสารคุณภาพห้องคัดกรอง","สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น","เช็ค + รับบริจาค"], "skill_levels": {"X-match":1,"จ่ายเลือด":1,"ปั่น":1,"รับบริจาค":1,"ลงเอกสารคุณภาพห้องคัดกรอง":1,"สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น":1,"เช็ค + รับบริจาค":1}, "time_windows": ["00:00-08:00","08:00-16:00","16:00-24:00"], "min_shifts_per_month": 21, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "MT 4", "type": "fulltime", "title": "Full Time", "off_days": [], "off_days_of_month": [12,13,14,15,16], "skills": ["X-match","จ่ายเลือด","ประสานงาน (ผู้ตรวจการ)","ปั่น","เช็ค + รับบริจาค"], "skill_levels": {"X-match":1,"จ่ายเลือด":1,"ประสานงาน (ผู้ตรวจการ)":1,"ปั่น":1,"เช็ค + รับบริจาค":1}, "time_windows": ["00:00-08:00","08:00-16:00","16:00-24:00"], "min_shifts_per_month": 21, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": [{"shift": "ห้อง X-match ดึก", "gap_days": 6}]},
+        {"name": "MT 5", "type": "fulltime", "title": "Full Time", "off_days": [], "off_days_of_month": [12,13,14,15,16], "skills": ["SDP","X-match","คัดแยกแลป","จ่ายเลือด","ประสานงาน (ผู้ตรวจการ)","ปั่น","รับบริจาค","ลงเอกสารคุณภาพห้องคัดกรอง","สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น","เช็ค + รับบริจาค"], "skill_levels": {"SDP":1,"X-match":1,"คัดแยกแลป":1,"จ่ายเลือด":1,"ประสานงาน (ผู้ตรวจการ)":1,"ปั่น":1,"รับบริจาค":1,"ลงเอกสารคุณภาพห้องคัดกรอง":1,"สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น":1,"เช็ค + รับบริจาค":1}, "time_windows": ["00:00-08:00","08:00-16:00","16:00-24:00"], "min_shifts_per_month": 17, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "MT 6", "type": "fulltime", "title": "Full Time", "off_days": [], "off_days_of_month": [], "skills": ["X-match","คัดแยกแลป"], "skill_levels": {"X-match":1,"คัดแยกแลป":1}, "time_windows": ["08:00-16:00"], "min_shifts_per_month": 7, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "MT 7", "type": "fulltime", "title": "Full Time", "off_days": [], "off_days_of_month": [], "skills": ["SDP","X-match","จ่ายเลือด","ประสานงาน (ผู้ตรวจการ)","ปั่น","รับบริจาค","ลงเอกสารคุณภาพห้องคัดกรอง","สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น","เช็ค + รับบริจาค"], "skill_levels": {"SDP":1,"X-match":1,"จ่ายเลือด":1,"ประสานงาน (ผู้ตรวจการ)":1,"ปั่น":1,"รับบริจาค":1,"ลงเอกสารคุณภาพห้องคัดกรอง":1,"สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น":1,"เช็ค + รับบริจาค":1}, "time_windows": ["00:00-08:00","08:00-16:00","16:00-24:00"], "min_shifts_per_month": 7, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "MT 8", "type": "fulltime", "title": "Full Time", "off_days": [], "off_days_of_month": [], "skills": ["SDP","X-match","จ่ายเลือด","ประสานงาน (ผู้ตรวจการ)","ปั่น","รับบริจาค","ลงเอกสารคุณภาพห้องคัดกรอง","สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น","เช็ค + รับบริจาค"], "skill_levels": {"SDP":1,"X-match":1,"จ่ายเลือด":1,"ประสานงาน (ผู้ตรวจการ)":1,"ปั่น":1,"รับบริจาค":1,"ลงเอกสารคุณภาพห้องคัดกรอง":1,"สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น":1,"เช็ค + รับบริจาค":1}, "time_windows": ["08:00-16:00","16:00-24:00"], "min_shifts_per_month": 17, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "MT 9", "type": "fulltime", "title": "Full Time", "off_days": [], "off_days_of_month": [], "skills": ["X-match","คัดแยกแลป","จ่ายเลือด","ประสานงาน (ผู้ตรวจการ)"], "skill_levels": {"X-match":1,"คัดแยกแลป":1,"จ่ายเลือด":1,"ประสานงาน (ผู้ตรวจการ)":1}, "time_windows": ["00:00-08:00","08:00-16:00","16:00-24:00"], "min_shifts_per_month": 17, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "MT 10", "type": "fulltime", "title": "Full Time", "off_days": [], "off_days_of_month": [], "skills": ["SDP","X-match","จ่ายเลือด","ประสานงาน (ผู้ตรวจการ)","ปั่น","รับบริจาค","ลงเอกสารคุณภาพห้องคัดกรอง","สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น","เช็ค + รับบริจาค"], "skill_levels": {"SDP":1,"X-match":1,"จ่ายเลือด":1,"ประสานงาน (ผู้ตรวจการ)":1,"ปั่น":1,"รับบริจาค":1,"ลงเอกสารคุณภาพห้องคัดกรอง":1,"สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น":1,"เช็ค + รับบริจาค":1}, "time_windows": ["00:00-08:00","08:00-16:00","16:00-24:00"], "min_shifts_per_month": 24, "max_shifts_per_month": 24, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "MT 11", "type": "fulltime", "title": "Full Time", "off_days": [], "off_days_of_month": [], "skills": ["SDP","X-match","จ่ายเลือด","ประสานงาน (ผู้ตรวจการ)","ปั่น","รับบริจาค","ลงเอกสารคุณภาพห้องคัดกรอง","สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น","เช็ค + รับบริจาค"], "skill_levels": {"SDP":1,"X-match":1,"จ่ายเลือด":1,"ประสานงาน (ผู้ตรวจการ)":1,"ปั่น":1,"รับบริจาค":1,"ลงเอกสารคุณภาพห้องคัดกรอง":1,"สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น":1,"เช็ค + รับบริจาค":1}, "time_windows": ["00:00-08:00","08:00-16:00","16:00-24:00"], "min_shifts_per_month": 17, "max_shifts_per_month": 20, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": [{"shift": "ห้อง X-match ดึก", "gap_days": 6}]},
+        {"name": "MT 12", "type": "fulltime", "title": "", "off_days": [], "off_days_of_month": [], "skills": ["X-match","จ่ายเลือด"], "skill_levels": {"X-match":1,"จ่ายเลือด":1}, "time_windows": ["00:00-08:00","08:00-16:00","16:00-24:00"], "min_shifts_per_month": 21, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "อาหลิว", "type": "parttime", "title": "Part Time", "off_days": [], "off_days_of_month": [], "skills": ["รับบริจาค","ลงเอกสารคุณภาพห้องคัดกรอง","สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น","เช็ค + รับบริจาค"], "skill_levels": {"รับบริจาค":1,"ลงเอกสารคุณภาพห้องคัดกรอง":1,"สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น":1,"เช็ค + รับบริจาค":1}, "time_windows": ["08:00-16:00","16:00-24:00"], "min_shifts_per_month": 25, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "MT 13", "type": "fulltime", "title": "Full Time", "off_days": [], "off_days_of_month": [], "skills": ["ปั่น","รับบริจาค","ลงเอกสารคุณภาพห้องคัดกรอง","สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น","เช็ค + รับบริจาค"], "skill_levels": {"ปั่น":1,"รับบริจาค":1,"ลงเอกสารคุณภาพห้องคัดกรอง":1,"สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น":1,"เช็ค + รับบริจาค":1}, "time_windows": ["08:00-16:00","16:00-24:00"], "min_shifts_per_month": None, "max_shifts_per_month": 8, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "MT 14", "type": "fulltime", "title": "Full Time", "off_days": [0,2,4,5,6], "off_days_of_month": [], "skills": ["ปั่น"], "skill_levels": {"ปั่น":1}, "time_windows": ["16:00-24:00"], "min_shifts_per_month": 6, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "PT 3", "type": "parttime", "title": "Part Time", "off_days": [], "off_days_of_month": [], "skills": ["X-match","จ่ายเลือด"], "skill_levels": {"X-match":1,"จ่ายเลือด":1}, "time_windows": ["00:00-08:00","08:00-16:00","16:00-24:00"], "min_shifts_per_month": 10, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "MT 15", "type": "fulltime", "title": "", "off_days": [0,1,2,3,5,6], "off_days_of_month": [], "skills": ["เช็ค + รับบริจาค"], "skill_levels": {"เช็ค + รับบริจาค":2}, "time_windows": ["16:00-24:00"], "min_shifts_per_month": 4, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+        {"name": "PT 4", "type": "parttime", "title": "Part Time", "off_days": [], "off_days_of_month": [], "skills": ["X-match","จ่ายเลือด"], "skill_levels": {"X-match":1,"จ่ายเลือด":1}, "time_windows": ["00:00-08:00","08:00-16:00","16:00-24:00"], "min_shifts_per_month": 10, "max_shifts_per_month": None, "min_gap_days": None, "min_gap_shifts": [], "min_gap_rules": []},
+    ],
+    "shifts": [
+        {
+            "name": "ห้อง X-match ดึก",
+            "positions": [{"name": "X-match", "constraint_note": "", "regular_only": False, "slot_count": 2, "time_window_name": "00:00-08:00", "required_skill": "X-match", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None}],
+            "active_days": None, "include_holidays": True, "min_fulltime": 1,
+        },
+        {
+            "name": "ห้อง X-match เช้า",
+            "positions": [
+                {"name": "คัดแยกแลป", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "08:00-16:00", "required_skill": "คัดแยกแลป", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
+                {"name": "จ่ายเลือด", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "08:00-16:00", "required_skill": "จ่ายเลือด", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
+                {"name": "ประสานงาน (ผู้ตรวจการ)", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "08:00-16:00", "required_skill": "ประสานงาน (ผู้ตรวจการ)", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
+                {"name": "X-match", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "08:00-16:00", "required_skill": "X-match", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
+            ],
+            "active_days": "5,6", "include_holidays": True, "min_fulltime": 1,
+        },
+        {
+            "name": "ห้อง X-match บ่าย",
+            "positions": [
+                {"name": "X-match", "constraint_note": "", "regular_only": False, "slot_count": 2, "time_window_name": "16:00-24:00", "required_skill": "X-match", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
+                {"name": "จ่ายเลือด", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "16:00-24:00", "required_skill": "จ่ายเลือด", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
+                {"name": "ประสานงาน (ผู้ตรวจการ)", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "16:00-24:00", "required_skill": "ประสานงาน (ผู้ตรวจการ)", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
+            ],
+            "active_days": None, "include_holidays": False, "min_fulltime": 1,
+        },
+        {
+            "name": "ห้อง Donor บ่าย",
+            "positions": [
+                {"name": "ปั่น", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "16:00-24:00", "required_skill": "ปั่น", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
+                {"name": "เช็ค + รับบริจาค", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "16:00-24:00", "required_skill": "เช็ค + รับบริจาค", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
+                {"name": "รับบริจาค", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "16:00-24:00", "required_skill": "รับบริจาค", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
+            ],
+            "active_days": "0,1,2,3,4", "include_holidays": False, "min_fulltime": 1,
+        },
+        {
+            "name": "ห้อง Donor เช้า",
+            "positions": [
+                {"name": "SDP", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "08:00-16:00", "required_skill": "SDP", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": "0,1,2,3,4,6"},
+                {"name": "ลงเอกสารคุณภาพห้องคัดกรอง", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "08:00-16:00", "required_skill": "ลงเอกสารคุณภาพห้องคัดกรอง", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
+                {"name": "สำรองปั่น + ลงเอกสารคุณภาพห้องเจาะปั่น", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "08:00-16:00", "required_skill": "สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
+                {"name": "ปั่น", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "08:00-16:00", "required_skill": "ปั่น", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
+            ],
+            "active_days": "5,6", "include_holidays": True, "min_fulltime": 1,
+        },
+    ],
+    "pairs": [
+        {"name_1": "MT 1", "name_2": "PT 1", "pair_type": "depends_on", "shift_names": ["ห้อง X-match ดึก"]},
+        {"name_1": "MT 10", "name_2": "PT 1", "pair_type": "depends_on", "shift_names": ["ห้อง X-match ดึก"]},
+    ],
+}
+
 
 def apply_template(template_id: int, conn=None):
     """
@@ -1908,6 +2008,10 @@ def apply_template(template_id: int, conn=None):
     conn = conn or get_connection()
     try:
         shift_ids = []
+        if template_id == 6:
+            import_all_data(_TEMPLATE_6_DATA, conn=conn)
+            all_shifts = conn.execute("SELECT id FROM shift").fetchall()
+            return [r[0] for r in all_shifts]
         conn.execute("DELETE FROM schedule_slot")
         conn.execute("DELETE FROM schedule_run")
         conn.execute("DELETE FROM shift_position")
