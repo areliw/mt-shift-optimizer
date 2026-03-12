@@ -40,6 +40,17 @@ const API = WORKSPACE_ID ? "/w/" + WORKSPACE_ID + "/api" : "/api";
 
 const THAI_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 
+/** เช็คว่า staff หยุดวันนี้ไหม (off_days=weekday, off_days_of_month=วันที่ของเดือน) */
+function _isStaffOffOnDay(mt, dayIndex, startDate) {
+  if (!startDate) return false;
+  const [y, m, d] = startDate.split("-").map(Number);
+  const date = new Date(y, m - 1, d + dayIndex);
+  const weekday = (date.getDay() + 6) % 7; // JS Sun=0 → Python Mon=0
+  if (mt.off_days && mt.off_days.includes(weekday)) return true;
+  if (mt.off_days_of_month && mt.off_days_of_month.includes(date.getDate())) return true;
+  return false;
+}
+
 function formatDayLabel(dayIndex, startDate) {
   if (!startDate) return "วันที่ " + (dayIndex + 1);
   const [y, m, d] = startDate.split("-").map(Number);
@@ -89,11 +100,45 @@ let currentShiftId = null;
 
 // Swap state
 let _swapPending = null;
+let _lastSwap = null; // เก็บข้อมูล swap ล่าสุดเพื่อ undo
 function _clearSwapPending() {
   if (_swapPending) {
     _swapPending.span.classList.remove("cell-name-swap-pending");
     _swapPending = null;
   }
+}
+function _showUndoSwapBanner() {
+  const old = document.getElementById("undo_swap_banner");
+  if (old) old.remove();
+  if (!_lastSwap) return;
+  const banner = document.createElement("div");
+  banner.id = "undo_swap_banner";
+  banner.className = "undo-swap-banner";
+  banner.innerHTML = `<span>สลับ "${_lastSwap.name_a}" ↔ "${_lastSwap.name_b}" แล้ว</span> <button id="undo_swap_btn">↩ ยกเลิก</button>`;
+  const wrap = document.getElementById("scheduleTableWrap") || document.body;
+  wrap.parentElement.insertBefore(banner, wrap);
+  document.getElementById("undo_swap_btn").addEventListener("click", async () => {
+    const s = _lastSwap;
+    if (!s) return;
+    _lastSwap = null;
+    banner.remove();
+    try {
+      const r = await fetch(`${API}/schedule/${s.runId}/swap`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          day_a: s.day_a, shift_name_a: s.shift_a, position_a: s.pos_a, slot_index_a: s.slot_a,
+          day_b: s.day_b, shift_name_b: s.shift_b, position_b: s.pos_b, slot_index_b: s.slot_b,
+        }),
+      });
+      if (!r.ok) throw new Error("undo failed");
+      await refreshSchedule();
+    } catch (e) {
+      alert("ยกเลิกสลับไม่สำเร็จ: " + e.message);
+    }
+  });
+  // auto-hide after 15 seconds
+  setTimeout(() => { _lastSwap = null; banner.remove(); }, 15000);
 }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") _clearSwapPending(); });
 
@@ -896,10 +941,10 @@ function renderSchedule(data, staffList) {
     busyByDay[d].add(s.staff_name);
   });
   wrap.querySelectorAll(".cell-dummy").forEach((span) => {
-    span.addEventListener("click", () => handleDummyClick(span, sf, runId, busyByDay));
+    span.addEventListener("click", () => handleDummyClick(span, sf, runId, busyByDay, startDate));
   });
   wrap.querySelectorAll(".cell-name").forEach((span) => {
-    span.addEventListener("click", () => handleNameClick(span, sf, runId, busyByDay));
+    span.addEventListener("click", () => handleNameClick(span, sf, runId, busyByDay, startDate));
   });
 
   // Summary stats
@@ -948,7 +993,7 @@ function renderScheduleSummary(slots, staffList) {
   wrap.after(div);
 }
 
-async function handleDummyClick(span, staffList, runId, busyByDay) {
+async function handleDummyClick(span, staffList, runId, busyByDay, startDate) {
   if (span.dataset.loading) return;
   const day = parseInt(span.dataset.day, 10);
   const shiftName = span.dataset.shift;
@@ -987,9 +1032,11 @@ async function handleDummyClick(span, staffList, runId, busyByDay) {
     opt.value = mt.name;
     const isBusy = busy.has(mt.name);
     const hasSkill = canWorkPosition(mt);
+    const isOff = _isStaffOffOnDay(mt, day, startDate);
     let label = mt.name;
     if (isBusy) label += " (มีเวรแล้ว)";
     else if (!hasSkill && requiredSkill) label += " (ไม่มีทักษะ)";
+    if (isOff) label += " (off)";
     opt.textContent = label;
     if (isBusy || (!hasSkill && requiredSkill)) opt.disabled = true;
     select.appendChild(opt);
@@ -1002,7 +1049,7 @@ async function handleDummyClick(span, staffList, runId, busyByDay) {
     ns.textContent = "ว่าง";
     Object.assign(ns.dataset, { run: runId, day, shift: shiftName, pos: position, slot: slotIndex });
     select.replaceWith(ns);
-    ns.addEventListener("click", () => handleDummyClick(ns, staffList, runId, busyByDay));
+    ns.addEventListener("click", () => handleDummyClick(ns, staffList, runId, busyByDay, startDate));
   };
 
   span.replaceWith(select);
@@ -1030,7 +1077,7 @@ async function handleDummyClick(span, staffList, runId, busyByDay) {
   select.addEventListener("blur", () => { if (!select.value) restoreSpan(); });
 }
 
-async function handleNameClick(span, staffList, runId, busyByDay) {
+async function handleNameClick(span, staffList, runId, busyByDay, startDate) {
   if (span.dataset.loading) return;
   const day = parseInt(span.dataset.day, 10);
   const shiftName = span.dataset.shift;
@@ -1060,8 +1107,15 @@ async function handleNameClick(span, staffList, runId, busyByDay) {
       });
       const rj = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(rj.detail || "swap failed");
+      // เก็บ swap ล่าสุดเพื่อ undo (สลับ a↔b กลับ)
+      _lastSwap = {
+        runId, name_a: src.staffName, name_b: currentName,
+        day_a: src.day, shift_a: src.shiftName, pos_a: src.position, slot_a: src.slotIndex,
+        day_b: day, shift_b: shiftName, pos_b: position, slot_b: slotIndex,
+      };
       if (rj.warnings && rj.warnings.length) alert("⚠️ คำเตือน:\n" + rj.warnings.join("\n"));
       await refreshSchedule();
+      _showUndoSwapBanner();
     } catch (e) {
       delete span.dataset.loading;
       alert("สลับไม่สำเร็จ: " + e.message);
@@ -1069,10 +1123,10 @@ async function handleNameClick(span, staffList, runId, busyByDay) {
     return;
   }
 
-  _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, position, slotIndex, currentName);
+  _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, position, slotIndex, currentName, startDate);
 }
 
-function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, position, slotIndex, currentName) {
+function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, position, slotIndex, currentName, startDate) {
   const wrap = document.createElement("span");
   wrap.className = "name-edit-wrap";
 
@@ -1105,9 +1159,11 @@ function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, po
     opt.value = mt.name;
     const isBusy = busy.has(mt.name);
     const hasSkill = canWorkPosition(mt);
+    const isOff = _isStaffOffOnDay(mt, day, startDate);
     let label = mt.name;
     if (isBusy && mt.name !== currentName) label += " (มีเวรแล้ว)";
     else if (!hasSkill && requiredSkill) label += " (ไม่มีทักษะ)";
+    if (isOff) label += " (off)";
     opt.textContent = label;
     if (mt.name === currentName) opt.selected = true;
     if (isBusy || (!hasSkill && requiredSkill)) opt.disabled = true;
@@ -1127,7 +1183,7 @@ function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, po
     ns.textContent = currentName;
     Object.assign(ns.dataset, { run: runId, day, shift: shiftName, pos: position, slot: slotIndex, name: currentName });
     wrap.replaceWith(ns);
-    ns.addEventListener("click", () => handleNameClick(ns, staffList, runId, busyByDay));
+    ns.addEventListener("click", () => handleNameClick(ns, staffList, runId, busyByDay, startDate));
   };
 
   wrap.appendChild(select);
@@ -1143,7 +1199,7 @@ function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, po
     ns.title = "รอสลับ — คลิกชื่ออื่น หรือ Esc เพื่อยกเลิก";
     ns.textContent = currentName;
     Object.assign(ns.dataset, { run: runId, day, shift: shiftName, pos: position, slot: slotIndex, name: currentName });
-    ns.addEventListener("click", () => handleNameClick(ns, staffList, runId, busyByDay));
+    ns.addEventListener("click", () => handleNameClick(ns, staffList, runId, busyByDay, startDate));
     wrap.replaceWith(ns);
     _swapPending = { span: ns, runId, day, shiftName, position, slotIndex, staffName: currentName };
   });
