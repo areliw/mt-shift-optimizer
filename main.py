@@ -1,4 +1,4 @@
-# main.py — FastAPI entry for MT Shift Optimizer
+# main.py —- FastAPI entry for MT Shift Optimizer
 
 import collections
 import io
@@ -78,6 +78,35 @@ from database import (
 )
 from scheduler import generate_schedule, diagnose_infeasible, DUMMY_WORKER
 from ortools.sat.python import cp_model
+from datetime import datetime, timedelta
+
+
+def _check_staff_off_day_warnings(staff_name: str, day: int) -> list[str]:
+    """เช็คว่าคนนี้หยุดวันนี้ไหม คืน list ของ warning (ว่าง = ไม่มีปัญหา)"""
+    warnings = []
+    # หา staff จาก mt_list by name
+    mt_list = get_mt_list()
+    mt = next((m for m in mt_list if m["name"] == staff_name), None)
+    if not mt:
+        return warnings
+    start_str = get_schedule_start_date()
+    if not start_str:
+        return warnings
+    try:
+        start_date = datetime.strptime(start_str.strip()[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return warnings
+    cal_date = start_date + timedelta(days=day)
+    # เช็ค off_days (weekday)
+    off_weekdays = set(mt.get("off_days") or [])
+    if cal_date.weekday() in off_weekdays:
+        day_names = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"]
+        warnings.append(f"'{staff_name}' ตั้งหยุดทุกวัน{day_names[cal_date.weekday()]} แต่วันที่ {cal_date.isoformat()} เป็นวัน{day_names[cal_date.weekday()]}")
+    # เช็ค off_days_of_month
+    off_month = mt.get("off_days_of_month") or []
+    if cal_date.day in off_month:
+        warnings.append(f"'{staff_name}' ตั้งหยุดวันที่ {cal_date.day} ของเดือน แต่ถูกจัดลงวันที่ {cal_date.isoformat()}")
+    return warnings
 
 # Initialize master DB (workspace registry) + migrate old data
 init_master_db()
@@ -823,12 +852,13 @@ def api_assign_slot(run_id: int, body: SlotAssign):
     name = body.staff_name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="staff_name ต้องไม่ว่าง")
+    warnings = _check_staff_off_day_warnings(name, body.day)
     try:
         update_slot_staff(run_id, body.day, body.shift_name, body.position, body.slot_index, name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     updated = get_schedule(run_id)
-    return {"ok": True, "run_id": run_id, "schedule": updated}
+    return {"ok": True, "run_id": run_id, "schedule": updated, "warnings": warnings}
 
 
 # --- Manual Slot Swap ---
@@ -838,6 +868,20 @@ def api_swap_slots(run_id: int, body: SlotSwap):
     data = get_schedule(run_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Schedule not found.")
+    # ดึงชื่อคนก่อน swap เพื่อเช็ค off-day warnings
+    data_before = get_schedule(run_id)
+    warnings = []
+    if data_before:
+        slots = data_before if isinstance(data_before, list) else data_before.get("slots", [])
+        for s in slots:
+            if (s.get("day") == body.day_a and s.get("shift_name") == body.shift_name_a
+                    and s.get("position") == body.position_a and s.get("slot_index") == body.slot_index_a):
+                # คนนี้จะไป day_b
+                warnings.extend(_check_staff_off_day_warnings(s["staff_name"], body.day_b))
+            if (s.get("day") == body.day_b and s.get("shift_name") == body.shift_name_b
+                    and s.get("position") == body.position_b and s.get("slot_index") == body.slot_index_b):
+                # คนนี้จะไป day_a
+                warnings.extend(_check_staff_off_day_warnings(s["staff_name"], body.day_a))
     try:
         swap_slots(
             run_id,
@@ -847,7 +891,7 @@ def api_swap_slots(run_id: int, body: SlotSwap):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     updated = get_schedule(run_id)
-    return {"ok": True, "run_id": run_id, "schedule": updated}
+    return {"ok": True, "run_id": run_id, "schedule": updated, "warnings": warnings}
 
 
 # --- API: Staff Pairs ---

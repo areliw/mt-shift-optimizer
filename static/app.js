@@ -1018,7 +1018,9 @@ async function handleDummyClick(span, staffList, runId, busyByDay) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ day, shift_name: shiftName, position, slot_index: slotIndex, staff_name: staffName }),
       });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "assign failed");
+      const rj = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(rj.detail || "assign failed");
+      if (rj.warnings && rj.warnings.length) alert("⚠️ คำเตือน:\n" + rj.warnings.join("\n"));
       await refreshSchedule();
     } catch (e) {
       restoreSpan();
@@ -1056,7 +1058,9 @@ async function handleNameClick(span, staffList, runId, busyByDay) {
           day_b: day, shift_name_b: shiftName, position_b: position, slot_index_b: slotIndex,
         }),
       });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "swap failed");
+      const rj = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(rj.detail || "swap failed");
+      if (rj.warnings && rj.warnings.length) alert("⚠️ คำเตือน:\n" + rj.warnings.join("\n"));
       await refreshSchedule();
     } catch (e) {
       delete span.dataset.loading;
@@ -1155,7 +1159,9 @@ function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, po
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ day, shift_name: shiftName, position, slot_index: slotIndex, staff_name: staffName }),
       });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "assign failed");
+      const rj = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(rj.detail || "assign failed");
+      if (rj.warnings && rj.warnings.length) alert("⚠️ คำเตือน:\n" + rj.warnings.join("\n"));
       await refreshSchedule();
     } catch (e) {
       restoreSpan();
