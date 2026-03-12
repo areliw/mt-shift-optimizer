@@ -15,17 +15,20 @@ from pathlib import Path
 # - INSTANCE_ID = สตริง (เช่น staging, หน่วยงานA) ใช้ shift_optimizer_{INSTANCE_ID}.db
 # - ไม่ตั้งอะไร = shift_optimizer.db เหมือนเดิม
 _base = Path(__file__).resolve().parent
+# DATA_DIR ชี้ไป persistent volume (เช่น /data บน Railway/Fly.io)
+# ถ้าไม่ตั้งใช้โฟลเดอร์เดียวกับ app (local dev เหมือนเดิม)
+_data_dir = Path(os.environ["DATA_DIR"]) if os.environ.get("DATA_DIR") else _base
 if os.environ.get("DATABASE_PATH"):
     DB_PATH = Path(os.environ["DATABASE_PATH"])
 elif os.environ.get("INSTANCE_ID"):
-    DB_PATH = _base / f"shift_optimizer_{os.environ['INSTANCE_ID'].strip()}.db"
+    DB_PATH = _data_dir / f"shift_optimizer_{os.environ['INSTANCE_ID'].strip()}.db"
 else:
-    DB_PATH = _base / "shift_optimizer.db"
+    DB_PATH = _data_dir / "shift_optimizer.db"
 ROOMS = ("donor", "xmatch")
 
 # --- Workspace isolation: แต่ละ workspace ใช้ DB file แยก ---
-WORKSPACES_DIR = _base / "workspaces"
-MASTER_DB_PATH = _base / "master.db"
+WORKSPACES_DIR = _data_dir / "workspaces"
+MASTER_DB_PATH = _data_dir / "master.db"
 
 # Context variable: ถูก set โดย async FastAPI dependency → propagate ไปยัง sync endpoints
 _workspace_db_path: contextvars.ContextVar[str | None] = contextvars.ContextVar(
