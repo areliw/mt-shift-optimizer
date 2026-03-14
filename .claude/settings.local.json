@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(gh auth status)"
+      "Bash(gh auth status)",
+      "Bash(ls -la /c/Users/tuf/OneDrive/เอกสาร/GitHub/mt-shift-optimizer/*.py)",
+      "Bash(python -c \"from database import init_master_db, create_workspace, list_workspaces, get_workspace, update_workspace_access_mode; print\\(''imports OK''\\)\")"
     ]
   }
 }
