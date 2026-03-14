@@ -8,6 +8,7 @@ import secrets
 import shutil
 import sqlite3
 import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # ให้แต่ละเครื่อง (แต่ละ deploy) ใช้ DB คนละไฟล์ได้
@@ -361,6 +362,7 @@ def init_db(conn=None):
         _migrate_staff_min_gap_days(conn)
         _migrate_staff_min_gap_shifts(conn)
         _migrate_staff_min_gap_rules(conn)
+        _migrate_staff_shift_limits(conn)
         _migrate_shift_include_holidays(conn)
         _migrate_staff_pair(conn)
         _migrate_staff_pair_shift_names(conn)
@@ -404,6 +406,15 @@ def _migrate_staff_min_gap_rules(conn):
     """เพิ่มคอลัมน์ min_gap_rules ให้ตาราง staff — กำหนดเว้นขั้นต่ำแยกตามกะ (JSON list of objects)"""
     try:
         conn.execute("ALTER TABLE staff ADD COLUMN min_gap_rules TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _migrate_staff_shift_limits(conn):
+    """เพิ่มคอลัมน์ shift_limits ให้ตาราง staff — min/max เวรแยกตามกะ (JSON: {"กะA": {"min":1,"max":5}})"""
+    try:
+        conn.execute("ALTER TABLE staff ADD COLUMN shift_limits TEXT")
         conn.commit()
     except sqlite3.OperationalError:
         pass
@@ -944,14 +955,14 @@ def get_mt_list(conn=None):
     conn = conn or get_connection()
     try:
         rows = conn.execute(
-            "SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts, ''), COALESCE(min_gap_rules, '') FROM staff ORDER BY id"
+            "SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts, ''), COALESCE(min_gap_rules, ''), COALESCE(shift_limits, '') FROM staff ORDER BY id"
         ).fetchall()
         if not rows:
             return []
         staff_ids = [r[0] for r in rows]
         off_days_map, off_month_map, skills_map, skill_levels_map, tw_map = _batch_load_staff_data(conn, staff_ids)
         mt_list = []
-        for sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw in rows:
+        for sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw, shift_limits_raw in rows:
             try:
                 gap_shifts = json.loads(gap_shifts_raw) if gap_shifts_raw else []
                 if not isinstance(gap_shifts, list):
@@ -978,6 +989,12 @@ def get_mt_list(conn=None):
                 gap_rules = norm
             except Exception:
                 gap_rules = []
+            try:
+                shift_limits = json.loads(shift_limits_raw) if shift_limits_raw else {}
+                if not isinstance(shift_limits, dict):
+                    shift_limits = {}
+            except Exception:
+                shift_limits = {}
             mt_list.append({
                 "name": name,
                 "type": stype,
@@ -992,6 +1009,7 @@ def get_mt_list(conn=None):
                 "min_gap_days": gap,
                 "min_gap_shifts": gap_shifts,
                 "min_gap_rules": gap_rules,
+                "shift_limits": shift_limits,
             })
         return mt_list
     finally:
@@ -1004,13 +1022,13 @@ def list_staff(conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        rows = conn.execute("SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts,''), COALESCE(min_gap_rules,'') FROM staff ORDER BY id").fetchall()
+        rows = conn.execute("SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts,''), COALESCE(min_gap_rules,''), COALESCE(shift_limits,'') FROM staff ORDER BY id").fetchall()
         if not rows:
             return []
         staff_ids = [r[0] for r in rows]
         off_days_map, off_month_map, skills_map, skill_levels_map, tw_map = _batch_load_staff_data(conn, staff_ids)
         result = []
-        for sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw in rows:
+        for sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw, shift_limits_raw in rows:
             try:
                 gap_shifts = json.loads(gap_shifts_raw) if gap_shifts_raw else []
                 if not isinstance(gap_shifts, list):
@@ -1053,6 +1071,7 @@ def list_staff(conn=None):
                     "min_gap_days": gap,
                     "min_gap_shifts": gap_shifts,
                     "min_gap_rules": gap_rules,
+                    "shift_limits": json.loads(shift_limits_raw) if shift_limits_raw else {},
                 }
             )
         return result
@@ -1066,10 +1085,10 @@ def get_staff(staff_id: int, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        row = conn.execute("SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts,''), COALESCE(min_gap_rules,'') FROM staff WHERE id = ?", (staff_id,)).fetchone()
+        row = conn.execute("SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts,''), COALESCE(min_gap_rules,''), COALESCE(shift_limits,'') FROM staff WHERE id = ?", (staff_id,)).fetchone()
         if not row:
             return None
-        sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw = row
+        sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw, shift_limits_raw = row
         try:
             gap_shifts = json.loads(gap_shifts_raw) if gap_shifts_raw else []
             if not isinstance(gap_shifts, list):
@@ -1101,13 +1120,49 @@ def get_staff(staff_id: int, conn=None):
         skills = [r[0] for r in conn.execute("SELECT skill FROM staff_skill WHERE staff_id = ? ORDER BY skill", (sid,)).fetchall()]
         skill_levels = {r[0]: int(r[1] or 1) for r in conn.execute("SELECT skill, COALESCE(level, 1) FROM staff_skill WHERE staff_id = ?", (sid,)).fetchall()}
         time_windows = [r[0] for r in conn.execute("SELECT time_window_name FROM staff_time_window WHERE staff_id = ? ORDER BY time_window_name", (sid,)).fetchall()]
-        return {"id": sid, "name": name, "type": stype, "title": title or "", "off_days": off_days, "off_days_of_month": off_days_of_month, "skills": skills, "skill_levels": skill_levels, "time_windows": time_windows, "min_shifts_per_month": mn, "max_shifts_per_month": mx, "min_gap_days": gap, "min_gap_shifts": gap_shifts, "min_gap_rules": gap_rules}
+        try:
+            shift_limits = json.loads(shift_limits_raw) if shift_limits_raw else {}
+            if not isinstance(shift_limits, dict):
+                shift_limits = {}
+        except Exception:
+            shift_limits = {}
+        return {"id": sid, "name": name, "type": stype, "title": title or "", "off_days": off_days, "off_days_of_month": off_days_of_month, "skills": skills, "skill_levels": skill_levels, "time_windows": time_windows, "min_shifts_per_month": mn, "max_shifts_per_month": mx, "min_gap_days": gap, "min_gap_shifts": gap_shifts, "min_gap_rules": gap_rules, "shift_limits": shift_limits}
     finally:
         if close:
             conn.close()
 
 
-def create_staff(name, off_days=None, skills=None, title=None, off_days_of_month=None, time_windows=None, min_shifts_per_month=None, max_shifts_per_month=None, min_gap_days=None, min_gap_shifts=None, min_gap_rules=None, conn=None):
+def _normalize_shift_limits(raw):
+    """normalize shift_limits -> {shift_name: {min: int|None, max: int|None}}"""
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    for shift_name, cfg in raw.items():
+        sn = str(shift_name or "").strip()
+        if not sn:
+            continue
+        cfg = cfg if isinstance(cfg, dict) else {}
+        mn = cfg.get("min", None)
+        mx = cfg.get("max", None)
+        try:
+            mn = int(mn) if mn is not None and str(mn) != "" else None
+        except Exception:
+            mn = None
+        try:
+            mx = int(mx) if mx is not None and str(mx) != "" else None
+        except Exception:
+            mx = None
+        if mn is not None and mn < 0:
+            mn = 0
+        if mx is not None and mx < 0:
+            mx = 0
+        if mn is None and mx is None:
+            continue
+        out[sn] = {"min": mn, "max": mx}
+    return out
+
+
+def create_staff(name, off_days=None, skills=None, title=None, off_days_of_month=None, time_windows=None, min_shifts_per_month=None, max_shifts_per_month=None, min_gap_days=None, min_gap_shifts=None, min_gap_rules=None, shift_limits=None, conn=None):
     off_days = off_days or []
     skills = skills or []
     off_days_of_month = off_days_of_month or []
@@ -1126,13 +1181,14 @@ def create_staff(name, off_days=None, skills=None, title=None, off_days_of_month
             gd = 0
         if sh and gd > 0:
             norm_gap_rules.append({"shift": sh, "gap_days": gd})
+    norm_shift_limits = _normalize_shift_limits(shift_limits)
     title = (title or "").strip() or None
     close = conn is None
     conn = conn or get_connection()
     try:
         stype = get_title_type(title or "", conn)
         cur = conn.execute(
-            "INSERT INTO staff (name, type, title, min_shifts_per_month, max_shifts_per_month, min_gap_days, min_gap_shifts, min_gap_rules) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO staff (name, type, title, min_shifts_per_month, max_shifts_per_month, min_gap_days, min_gap_shifts, min_gap_rules, shift_limits) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 stype,
@@ -1142,6 +1198,7 @@ def create_staff(name, off_days=None, skills=None, title=None, off_days_of_month
                 min_gap_days,
                 json.dumps(min_gap_shifts, ensure_ascii=False) if min_gap_shifts else None,
                 json.dumps(norm_gap_rules, ensure_ascii=False) if norm_gap_rules else None,
+                json.dumps(norm_shift_limits, ensure_ascii=False) if norm_shift_limits else None,
             ),
         )
         sid = cur.lastrowid
@@ -1165,7 +1222,7 @@ def create_staff(name, off_days=None, skills=None, title=None, off_days_of_month
             conn.close()
 
 
-def update_staff(sid, name, off_days=None, skills=None, title=None, off_days_of_month=None, time_windows=None, skill_levels=None, min_shifts_per_month=None, max_shifts_per_month=None, min_gap_days=None, min_gap_shifts=None, min_gap_rules=None, conn=None):
+def update_staff(sid, name, off_days=None, skills=None, title=None, off_days_of_month=None, time_windows=None, skill_levels=None, min_shifts_per_month=None, max_shifts_per_month=None, min_gap_days=None, min_gap_shifts=None, min_gap_rules=None, shift_limits=None, conn=None):
     off_days = off_days or []
     skills = skills or []
     off_days_of_month = off_days_of_month or []
@@ -1185,13 +1242,14 @@ def update_staff(sid, name, off_days=None, skills=None, title=None, off_days_of_
             gd = 0
         if sh and gd > 0:
             norm_gap_rules.append({"shift": sh, "gap_days": gd})
+    norm_shift_limits = _normalize_shift_limits(shift_limits)
     title = (title or "").strip() or None
     close = conn is None
     conn = conn or get_connection()
     try:
         stype = get_title_type(title or "", conn)
         conn.execute(
-            "UPDATE staff SET name = ?, type = ?, title = ?, min_shifts_per_month = ?, max_shifts_per_month = ?, min_gap_days = ?, min_gap_shifts = ?, min_gap_rules = ? WHERE id = ?",
+            "UPDATE staff SET name = ?, type = ?, title = ?, min_shifts_per_month = ?, max_shifts_per_month = ?, min_gap_days = ?, min_gap_shifts = ?, min_gap_rules = ?, shift_limits = ? WHERE id = ?",
             (
                 name,
                 stype,
@@ -1201,6 +1259,7 @@ def update_staff(sid, name, off_days=None, skills=None, title=None, off_days_of_
                 min_gap_days,
                 json.dumps(min_gap_shifts, ensure_ascii=False) if min_gap_shifts else None,
                 json.dumps(norm_gap_rules, ensure_ascii=False) if norm_gap_rules else None,
+                json.dumps(norm_shift_limits, ensure_ascii=False) if norm_shift_limits else None,
                 sid,
             ),
         )
@@ -1805,45 +1864,250 @@ def _get_position_skill_requirement(conn, shift_name, position):
     return (row[0] or "").strip(), int(row[1] or 0)
 
 
+def _position_time_window_name(conn, shift_name, position):
+    row = conn.execute(
+        """
+        SELECT COALESCE(sp.time_window_name, '')
+        FROM shift_position sp
+        JOIN shift s ON s.id = sp.shift_id
+        WHERE s.name = ? AND sp.name = ?
+        """,
+        (shift_name, position),
+    ).fetchone()
+    return (row[0] if row and row[0] else "").strip()
+
+
+def _time_to_minutes(value: str):
+    text = str(value or "").strip()
+    if not re.match(r"^\d{2}:\d{2}$", text):
+        return None
+    hh, mm = [int(x) for x in text.split(":", 1)]
+    if mm < 0 or mm > 59:
+        return None
+    if hh == 24 and mm == 0:
+        return 24 * 60
+    if hh < 0 or hh > 23:
+        return None
+    return hh * 60 + mm
+
+
+def _window_contains_catalog(catalog, staff_window_name, position_window_name):
+    if not position_window_name or not staff_window_name:
+        return True
+    pos = catalog.get(position_window_name)
+    staff = catalog.get(staff_window_name)
+    if not pos or not staff:
+        return False
+    pos_start = _time_to_minutes(pos.get("start_time", ""))
+    pos_end = _time_to_minutes(pos.get("end_time", ""))
+    staff_start = _time_to_minutes(staff.get("start_time", ""))
+    staff_end = _time_to_minutes(staff.get("end_time", ""))
+    if None in (pos_start, pos_end, staff_start, staff_end):
+        return False
+    return staff_start <= pos_start and staff_end >= pos_end
+
+
+def _staff_can_cover_position_time_window(conn, staff_id, position_tw):
+    if not position_tw:
+        return True
+    catalog = get_time_window_catalog_dict(conn=conn)
+    if not catalog:
+        return False
+    staff_windows = [
+        str(r[0]).strip()
+        for r in conn.execute("SELECT time_window_name FROM staff_time_window WHERE staff_id = ?", (staff_id,)).fetchall()
+        if r and r[0]
+    ]
+    if not staff_windows:
+        return False
+    return any(_window_contains_catalog(catalog, sw, position_tw) for sw in staff_windows)
+
+
+def _load_staff_shift_limits(conn, staff_id):
+    row = conn.execute("SELECT COALESCE(shift_limits, '') FROM staff WHERE id = ?", (staff_id,)).fetchone()
+    raw = row[0] if row else ""
+    try:
+        data = json.loads(raw) if raw else {}
+    except Exception:
+        data = {}
+    return _normalize_shift_limits(data)
+
+
+def _count_staff_shift_assignments(conn, run_id, staff_name, shift_name, exclude_slot=None):
+    rows = conn.execute(
+        """
+        SELECT day, shift_name, position, slot_index
+        FROM schedule_slot
+        WHERE run_id = ? AND staff_name = ? AND shift_name = ?
+        """,
+        (run_id, staff_name, shift_name),
+    ).fetchall()
+    count = 0
+    for d, sn, pos, si in rows:
+        if exclude_slot and (int(d), sn, pos, int(si)) == exclude_slot:
+            continue
+        count += 1
+    return count
+
+
+def _validate_depends_on_for_shift(conn, run_id, day, shift_name, overrides=None):
+    overrides = overrides or {}
+    rows = conn.execute(
+        """
+        SELECT position, slot_index, staff_name
+        FROM schedule_slot
+        WHERE run_id = ? AND day = ? AND shift_name = ?
+        """,
+        (run_id, day, shift_name),
+    ).fetchall()
+    assigned = []
+    for pos, si, name in rows:
+        key = (int(day), shift_name, pos, int(si))
+        assigned_name = overrides[key] if key in overrides else name
+        if assigned_name and assigned_name != _DUMMY_WORKER:
+            assigned.append(assigned_name)
+    assigned_set = set(assigned)
+
+    pair_rows = conn.execute(
+        """
+        SELECT s1.name, s2.name, COALESCE(sp.shift_names, '[]')
+        FROM staff_pair sp
+        JOIN staff s1 ON s1.id = sp.staff_id_1
+        JOIN staff s2 ON s2.id = sp.staff_id_2
+        WHERE sp.pair_type = 'depends_on'
+        """
+    ).fetchall()
+    for provider_name, dependent_name, shift_names_raw in pair_rows:
+        try:
+            shift_names = json.loads(shift_names_raw) if shift_names_raw else []
+        except Exception:
+            shift_names = []
+        if not isinstance(shift_names, list):
+            shift_names = []
+        shift_names = [str(s).strip() for s in shift_names if str(s).strip()]
+        if shift_names and shift_name not in shift_names:
+            continue
+        if dependent_name in assigned_set and provider_name not in assigned_set:
+            raise ValueError(f"'{dependent_name}' ต้องอยู่กะเดียวกันกับ '{provider_name}' ({shift_name})")
+
+
+def _validate_manual_assignment(conn, run_id, day, shift_name, position, slot_index, staff_name, exclude_slot=None, override_slots=None):
+    if staff_name == _DUMMY_WORKER:
+        return
+
+    staff_row = conn.execute("SELECT id FROM staff WHERE name = ?", (staff_name,)).fetchone()
+    if not staff_row:
+        raise ValueError(f"ไม่พบบุคลากร '{staff_name}' ในระบบ")
+    staff_id = staff_row[0]
+
+    # วันหยุด
+    start_date_str = get_schedule_start_date(conn=conn)
+    if start_date_str:
+        try:
+            schedule_date = datetime.strptime(start_date_str.strip()[:10], "%Y-%m-%d") + timedelta(days=int(day))
+            weekday = schedule_date.weekday()
+            day_of_month = schedule_date.day
+            off_weekdays = {int(r[0]) for r in conn.execute("SELECT day FROM staff_off_day WHERE staff_id = ?", (staff_id,)).fetchall()}
+            off_month_days = {int(r[0]) for r in conn.execute("SELECT day FROM staff_off_day_of_month WHERE staff_id = ?", (staff_id,)).fetchall()}
+            if weekday in off_weekdays or day_of_month in off_month_days:
+                raise ValueError(f"'{staff_name}' เป็นวัน off ในวันที่นี้ — ลงไม่ได้")
+        except ValueError:
+            raise
+        except Exception:
+            pass
+
+    # ช่วงเวลา
+    pos_tw = _position_time_window_name(conn, shift_name, position)
+    if pos_tw and not _staff_can_cover_position_time_window(conn, staff_id, pos_tw):
+        raise ValueError(f"'{staff_name}' ไม่ได้อยู่ช่วงเวลา '{pos_tw}' ของตำแหน่งนี้ — ลงไม่ได้")
+
+    # ทักษะ
+    req_skill, min_level = _get_position_skill_requirement(conn, shift_name, position)
+    if req_skill:
+        skill_row = conn.execute(
+            "SELECT COALESCE(level, 1) FROM staff_skill WHERE staff_id = ? AND skill = ?",
+            (staff_id, req_skill),
+        ).fetchone()
+        if not skill_row:
+            raise ValueError(f"'{staff_name}' ไม่มีทักษะ '{req_skill}' ที่ตำแหน่งนี้ต้องการ — ลงไม่ได้")
+        lvl = int(skill_row[0] or 1)
+        if lvl < min_level:
+            raise ValueError(f"'{staff_name}' มีทักษะ '{req_skill}' ระดับ {lvl} ต่ำกว่าที่ตำแหน่งต้องการ (≥{min_level}) — ลงไม่ได้")
+
+    # วันเดียวกันห้ามลงมากกว่า 1 ช่อง
+    existing_rows = conn.execute(
+        """
+        SELECT day, shift_name, position, slot_index
+        FROM schedule_slot
+        WHERE run_id = ? AND day = ? AND staff_name = ?
+        """,
+        (run_id, day, staff_name),
+    ).fetchall()
+    for d, sn, pos, si in existing_rows:
+        slot = (int(d), sn, pos, int(si))
+        if exclude_slot and slot == exclude_slot:
+            continue
+        if override_slots and slot in override_slots and override_slots[slot] != staff_name:
+            continue
+        if slot != (int(day), shift_name, position, int(slot_index)):
+            raise ValueError(f"'{staff_name}' มีเวรแล้วในวันเดียวกัน ({sn} / {pos} / ช่อง {si})")
+
+    # min/max ต่อกะรายคน (manual enforce เฉพาะ max)
+    shift_limits = _load_staff_shift_limits(conn, staff_id)
+    lim = shift_limits.get(shift_name) or {}
+    mx = lim.get("max", None)
+    if mx is not None:
+        target_slot = (int(day), shift_name, position, int(slot_index))
+        current_count = 0
+        rows_in_shift = conn.execute(
+            """
+            SELECT day, shift_name, position, slot_index
+            FROM schedule_slot
+            WHERE run_id = ? AND staff_name = ? AND shift_name = ?
+            """,
+            (run_id, staff_name, shift_name),
+        ).fetchall()
+        for d, sn, pos, si in rows_in_shift:
+            slot = (int(d), sn, pos, int(si))
+            if slot == target_slot:
+                continue
+            if exclude_slot and slot == exclude_slot:
+                continue
+            if override_slots and slot in override_slots and override_slots[slot] != staff_name:
+                continue
+            current_count += 1
+
+        new_count = current_count + 1
+        if new_count > int(mx):
+            raise ValueError(f"'{staff_name}' ตั้งเพดานกะ '{shift_name}' สูงสุด {mx} เวร/เดือน")
+
+
 def update_slot_staff(run_id, day, shift_name, position, slot_index, new_staff_name, conn=None):
     """Manual override: เปลี่ยนชื่อ staff ใน slot ที่ระบุ (เช่น แทนที่ _DUMMY_ ด้วยคนจริง)"""
     close = conn is None
     conn = conn or get_connection()
     try:
-        # Guard: เช็ค skill ว่าคนที่ยัดลงมีทักษะตรงตำแหน่งหรือไม่
-        req_skill, min_level = _get_position_skill_requirement(conn, shift_name, position)
-        if req_skill:
-            staff_row = conn.execute("SELECT id FROM staff WHERE name = ?", (new_staff_name,)).fetchone()
-            if not staff_row:
-                raise ValueError(f"ไม่พบบุคลากร '{new_staff_name}' ในระบบ")
-            staff_id = staff_row[0]
-            skill_row = conn.execute(
-                "SELECT COALESCE(level, 1) FROM staff_skill WHERE staff_id = ? AND skill = ?",
-                (staff_id, req_skill),
-            ).fetchone()
-            if not skill_row:
-                raise ValueError(f"'{new_staff_name}' ไม่มีทักษะ '{req_skill}' ที่ตำแหน่งนี้ต้องการ — ลงไม่ได้")
-            lvl = int(skill_row[0] or 1)
-            if lvl < min_level:
-                raise ValueError(
-                    f"'{new_staff_name}' มีทักษะ '{req_skill}' ระดับ {lvl} ต่ำกว่าที่ตำแหน่งต้องการ (≥{min_level}) — ลงไม่ได้"
-                )
+        target_slot = (int(day), shift_name, position, int(slot_index))
+        _validate_manual_assignment(
+            conn,
+            run_id,
+            day,
+            shift_name,
+            position,
+            slot_index,
+            new_staff_name,
+            exclude_slot=target_slot,
+        )
 
-        # Guard: ห้ามคนเดียวกันมีเวรมากกว่า 1 ช่องในวันเดียวกัน (กัน "แยกร่าง")
-        existing = conn.execute(
-            """
-            SELECT shift_name, position, slot_index
-            FROM schedule_slot
-            WHERE run_id = ? AND day = ? AND staff_name = ?
-              AND NOT (shift_name = ? AND position = ? AND slot_index = ?)
-            LIMIT 1
-            """,
-            (run_id, day, new_staff_name, shift_name, position, slot_index),
-        ).fetchone()
-        if existing:
-            raise ValueError(
-                f"'{new_staff_name}' มีเวรแล้วในวันเดียวกัน ({existing[0]} / {existing[1]} / ช่อง {existing[2]})"
-            )
+        # เช็ค depends_on ทั้งกะ/วัน หลังแทนที่ชื่อใหม่
+        _validate_depends_on_for_shift(
+            conn,
+            run_id,
+            day,
+            shift_name,
+            overrides={target_slot: new_staff_name},
+        )
+
         conn.execute(
             "UPDATE schedule_slot SET staff_name = ? WHERE run_id = ? AND day = ? AND shift_name = ? AND position = ? AND slot_index = ?",
             (new_staff_name, run_id, day, shift_name, position, slot_index),
@@ -1870,6 +2134,45 @@ def swap_slots(run_id, day_a, shift_a, pos_a, slot_a, day_b, shift_b, pos_b, slo
         if not row_a or not row_b:
             raise ValueError("ไม่พบ slot ที่ระบุ")
         name_a, name_b = row_a[0], row_b[0]
+
+        slot_key_a = (int(day_a), shift_a, pos_a, int(slot_a))
+        slot_key_b = (int(day_b), shift_b, pos_b, int(slot_b))
+        overrides = {
+            slot_key_a: name_b,
+            slot_key_b: name_a,
+        }
+
+        # ตรวจความถูกต้องของชื่อใหม่ใน slot ปลายทางทั้งสองข้าง
+        if name_b != _DUMMY_WORKER:
+            _validate_manual_assignment(
+                conn,
+                run_id,
+                day_a,
+                shift_a,
+                pos_a,
+                slot_a,
+                name_b,
+                exclude_slot=slot_key_b,
+                override_slots=overrides,
+            )
+        if name_a != _DUMMY_WORKER:
+            _validate_manual_assignment(
+                conn,
+                run_id,
+                day_b,
+                shift_b,
+                pos_b,
+                slot_b,
+                name_a,
+                exclude_slot=slot_key_a,
+                override_slots=overrides,
+            )
+
+        # ตรวจ depends_on ของกะที่ได้รับผลกระทบหลัง swap
+        _validate_depends_on_for_shift(conn, run_id, day_a, shift_a, overrides=overrides)
+        if not (int(day_a) == int(day_b) and shift_a == shift_b):
+            _validate_depends_on_for_shift(conn, run_id, day_b, shift_b, overrides=overrides)
+
         conn.execute(
             "UPDATE schedule_slot SET staff_name=? WHERE run_id=? AND day=? AND shift_name=? AND position=? AND slot_index=?",
             (name_b, run_id, day_a, shift_a, pos_a, slot_a),

@@ -216,6 +216,7 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
         mn = int(mt.get("min_shifts_per_month") or 0)
         mx = mt.get("max_shifts_per_month")
         mx = int(mx) if mx else None
+        shift_limits = mt.get("shift_limits") or {}
 
         # นับ slot ที่ลงได้ (ไม่จำกัด 1/วัน)
         can_work_slots = sum(
@@ -266,6 +267,44 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
             reasons.append(
                 f"'{mt['name']}' ตั้ง max {mx} < min {mn} — ขัดแย้งกัน"
             )
+
+        # per-shift min/max (shift_limits)
+        if isinstance(shift_limits, dict):
+            for shift_name, lim in shift_limits.items():
+                if not isinstance(lim, dict):
+                    continue
+                try:
+                    smin = int(lim.get("min")) if lim.get("min") is not None and str(lim.get("min")) != "" else None
+                except Exception:
+                    smin = None
+                try:
+                    smax = int(lim.get("max")) if lim.get("max") is not None and str(lim.get("max")) != "" else None
+                except Exception:
+                    smax = None
+                if smin is not None and smin < 0:
+                    smin = 0
+                if smax is not None and smax < 0:
+                    smax = 0
+                if smin is None and smax is None:
+                    continue
+                slots = [item for item in expanded if item[0]["name"] == str(shift_name)]
+                if not slots:
+                    reasons.append(f"'{mt['name']}' ตั้งเงื่อนไขกะ '{shift_name}' แต่ไม่พบกะนี้ในระบบ")
+                    continue
+                max_possible = sum(
+                    1
+                    for day in range(num_days)
+                    if any(
+                        _is_slot_active_on_day(s, p, day, start_date, holiday_set)
+                        and available_on_day(mt, day)
+                        and _staff_can_work_position(mt, p, catalog)
+                        for s, p, _, _ in slots
+                    )
+                )
+                if smax is not None and smin is not None and smax < smin:
+                    reasons.append(f"'{mt['name']}' ตั้งกะ '{shift_name}' max {smax} < min {smin}")
+                if smin is not None and smin > max_possible:
+                    reasons.append(f"'{mt['name']}' ตั้งกะ '{shift_name}' ขั้นต่ำ {smin} แต่ทำได้สูงสุด {max_possible}")
 
     # 3) ตำแหน่งต้องการทักษะแต่ไม่มีใครมี
     for shift in shift_list:
@@ -538,6 +577,34 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
             model.add(total >= int(mn))
         if mx and int(mx) > 0:
             model.add(total <= int(mx))
+
+        # min/max ต่อกะรายคน (shift_limits)
+        shift_limits = mt.get("shift_limits") or {}
+        if isinstance(shift_limits, dict):
+            for shift_name, lim in shift_limits.items():
+                if not isinstance(lim, dict):
+                    continue
+                try:
+                    smin = int(lim.get("min")) if lim.get("min") is not None and str(lim.get("min")) != "" else None
+                except Exception:
+                    smin = None
+                try:
+                    smax = int(lim.get("max")) if lim.get("max") is not None and str(lim.get("max")) != "" else None
+                except Exception:
+                    smax = None
+                shift_terms = [
+                    assign[(mt["name"], day, shift["name"], pos_name, slot_i)]
+                    for day in range(num_days)
+                    for shift, pos, pos_name, slot_i in expanded
+                    if shift["name"] == str(shift_name)
+                ]
+                if not shift_terms:
+                    continue
+                shift_total = sum(shift_terms)
+                if smin is not None and smin > 0:
+                    model.add(shift_total >= smin)
+                if smax is not None and smax >= 0:
+                    model.add(shift_total <= smax)
 
     # --- min_gap: sliding window — ใน N+1 วันต่อเนื่องทำได้ไม่เกิน 1 วัน (รองรับแยกตามกะ) ---
     def _apply_gap_rule(mt_name: str, g: int, shift_names: list[str] | None):

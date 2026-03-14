@@ -241,6 +241,7 @@ class StaffCreate(BaseModel):
     min_gap_days: int | None = None
     min_gap_shifts: list[str] = []
     min_gap_rules: list[dict] = []
+    shift_limits: dict[str, dict[str, int | None]] = {}
 
     @field_validator("name")
     @classmethod
@@ -271,6 +272,7 @@ class StaffUpdate(BaseModel):
     min_gap_days: int | None = None
     min_gap_shifts: list[str] = []
     min_gap_rules: list[dict] = []
+    shift_limits: dict[str, dict[str, int | None]] = {}
 
     @field_validator("name")
     @classmethod
@@ -495,6 +497,7 @@ def api_create_staff(body: StaffCreate):
             min_gap_days=body.min_gap_days,
             min_gap_shifts=body.min_gap_shifts,
             min_gap_rules=body.min_gap_rules,
+            shift_limits=body.shift_limits,
         )
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail=f"ชื่อ '{body.name}' มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
@@ -520,6 +523,7 @@ def api_update_staff(staff_id: int, body: StaffUpdate):
             min_gap_days=body.min_gap_days,
             min_gap_shifts=body.min_gap_shifts,
             min_gap_rules=body.min_gap_rules,
+            shift_limits=body.shift_limits,
         )
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail=f"ชื่อ '{body.name}' มีอยู่แล้ว กรุณาใช้ชื่ออื่น")

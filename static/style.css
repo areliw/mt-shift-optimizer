@@ -1363,6 +1363,51 @@ li .name { flex: 1; }
   font-size: .8rem;
 }
 
+/* ===== Staff × Shift matrix ===== */
+.summary-matrix-details { margin-top: .75rem; }
+.summary-matrix-toggle {
+  cursor: pointer;
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--primary);
+}
+.summary-matrix-wrap {
+  overflow-x: auto;
+  margin-top: .5rem;
+}
+.summary-matrix {
+  border-collapse: collapse;
+  font-size: .78rem;
+  width: 100%;
+}
+.summary-matrix th,
+.summary-matrix td {
+  border: 1px solid var(--border);
+  padding: 3px 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+.summary-matrix th {
+  background: var(--bg);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+.summary-matrix .matrix-name {
+  text-align: left;
+  font-weight: 500;
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.summary-matrix .cell-zero {
+  color: var(--text-3, #ccc);
+}
+.summary-matrix tfoot td {
+  background: var(--bg);
+  font-weight: 600;
+}
+
 /* ===== Position max-per-week ===== */
 .position-max-per-week {
   font-size: .8rem;
