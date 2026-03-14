@@ -2246,14 +2246,14 @@ def _validate_manual_assignment(conn, run_id, day, shift_name, position, slot_in
         if lvl < min_level:
             raise ValueError(f"'{staff_name}' มีทักษะ '{req_skill}' ระดับ {lvl} ต่ำกว่าที่ตำแหน่งต้องการ (≥{min_level}) — ลงไม่ได้")
 
-    # วันเดียวกันห้ามลงมากกว่า 1 ช่อง
+    # กะเดียวกัน วันเดียวกัน ห้ามลงมากกว่า 1 ตำแหน่ง (แยกร่างไม่ได้)
     existing_rows = conn.execute(
         """
         SELECT day, shift_name, position, slot_index
         FROM schedule_slot
-        WHERE run_id = ? AND day = ? AND staff_name = ?
+        WHERE run_id = ? AND day = ? AND shift_name = ? AND staff_name = ?
         """,
-        (run_id, day, staff_name),
+        (run_id, day, shift_name, staff_name),
     ).fetchall()
     for d, sn, pos, si in existing_rows:
         slot = (int(d), sn, pos, int(si))
