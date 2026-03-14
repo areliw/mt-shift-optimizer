@@ -717,9 +717,7 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
                     )
                     day += 7
 
-    # min/max shifts per month (min = soft, max = hard)
-    MIN_SHIFT_PENALTY = 200_000  # penalty ต่อเวรที่ขาดจาก min
-    min_shift_penalty_terms = []
+    # min/max shifts per month (hard)
     for mt in mt_list:
         total = sum(
             assign[(mt["name"], day, shift["name"], pos_name, slot_i)]
@@ -729,14 +727,11 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
         mn = mt.get("min_shifts_per_month")
         mx = mt.get("max_shifts_per_month")
         if mn and int(mn) > 0:
-            mn_val = int(mn)
-            shortfall = model.new_int_var(0, mn_val, f"min_month_short_{mt['name']}")
-            model.add(shortfall >= mn_val - total)
-            min_shift_penalty_terms.append(shortfall)
+            model.add(total >= int(mn))
         if mx and int(mx) > 0:
             model.add(total <= int(mx))
 
-        # min/max ต่อกะรายคน (min = soft, max = hard)
+        # min/max ต่อกะรายคน (hard)
         shift_limits = mt.get("shift_limits") or {}
         if isinstance(shift_limits, dict):
             for shift_name, lim in shift_limits.items():
@@ -760,9 +755,7 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
                     continue
                 shift_total = sum(shift_terms)
                 if smin is not None and smin > 0:
-                    sl_short = model.new_int_var(0, smin, f"sl_short_{mt['name']}_{shift_name}")
-                    model.add(sl_short >= smin - shift_total)
-                    min_shift_penalty_terms.append(sl_short)
+                    model.add(shift_total >= smin)
                 if smax is not None and smax >= 0:
                     model.add(shift_total <= smax)
 
@@ -1005,12 +998,11 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
 
     MIN_FT_PENALTY = 500_000
     ft_obj = sum(min_ft_penalty_terms) * MIN_FT_PENALTY if min_ft_penalty_terms else 0
-    min_shift_obj = sum(min_shift_penalty_terms) * MIN_SHIFT_PENALTY if min_shift_penalty_terms else 0
 
     if dummy_terms:
-        model.minimize(total_obj + sum(dummy_terms) * DUMMY_PENALTY + ft_obj + min_shift_obj)
+        model.minimize(total_obj + sum(dummy_terms) * DUMMY_PENALTY + ft_obj)
     else:
-        model.minimize(total_obj + ft_obj + min_shift_obj)
+        model.minimize(total_obj + ft_obj)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = timeout_seconds

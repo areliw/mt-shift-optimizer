@@ -897,10 +897,16 @@ def api_run_schedule_stream(
 
     progress_q: _queue.Queue = _queue.Queue()
 
+    # Capture workspace context for the solver thread
+    from database import _workspace_db_path
+    _ws_path = _workspace_db_path.get(None)
+
     def _on_progress(info):
         progress_q.put(("progress", info))
 
     def _solver_thread():
+        if _ws_path is not None:
+            _workspace_db_path.set(_ws_path)
         try:
             slots, solver_obj, status = generate_schedule(
                 num_days=num_days, start_date_str=start_date_str or None, on_progress=_on_progress,
