@@ -114,6 +114,22 @@ def _parse_active_days(active_days_str):
     return days if days else None
 
 
+def _parse_active_days_of_month(active_days_of_month):
+    """แปลง active_days_of_month → set ของ day 1-31 หรือ None ถ้าว่าง = ไม่จำกัดตามวันที่"""
+    if not active_days_of_month:
+        return None
+    days = set()
+    values = active_days_of_month if isinstance(active_days_of_month, (list, tuple, set)) else str(active_days_of_month).split(",")
+    for part in values:
+        try:
+            day = int(str(part).strip())
+        except (TypeError, ValueError):
+            continue
+        if 1 <= day <= 31:
+            days.add(day)
+    return days if days else None
+
+
 def _parse_holiday_dates(holiday_str):
     """แปลง holiday_dates string → set ของ date objects"""
     if not holiday_str:
@@ -139,22 +155,28 @@ def _is_shift_active_on_day(shift, day_index, start_date, holiday_set=None):
     - include_holidays=False: วันหยุดราชการปิดกะนี้ (แม้ weekday ตรงกับ active_days ก็ไม่เปิด)
     """
     active_days_set = _parse_active_days(shift.get("active_days"))
-    if active_days_set is None:
+    active_days_of_month = _parse_active_days_of_month(shift.get("active_days_of_month"))
+    if active_days_set is None and active_days_of_month is None:
         return True
     if start_date is not None:
         cal_date = start_date + timedelta(days=day_index)
         weekday = cal_date.weekday()
-        # ไม่ติ๊กรวมวันหยุดราชการ → วันหยุดราชการปิดกะนี้
-        if not shift.get("include_holidays") and holiday_set and cal_date in holiday_set:
+        day_of_month = cal_date.day
+        weekday_match = active_days_set is not None and weekday in active_days_set
+        month_match = active_days_of_month is not None and day_of_month in active_days_of_month
+        # ไม่ติ๊กรวมวันหยุดราชการ → วันหยุดราชการปิดกะนี้ ยกเว้นถ้าระบุวันที่ของเดือนตรง ๆ ไว้
+        if not shift.get("include_holidays") and holiday_set and cal_date in holiday_set and not month_match:
             return False
-        if weekday in active_days_set:
+        if weekday_match or month_match:
             return True
         if shift.get("include_holidays") and holiday_set and cal_date in holiday_set:
             return True
         return False
     # ไม่มี start_date → ใช้ day_index % 7 เป็นวันในสัปดาห์ (0=จ … 6=อา) เพื่อยังเคารพ active_days
     weekday = day_index % 7
-    if weekday in active_days_set:
+    if active_days_set is not None and weekday in active_days_set:
+        return True
+    if active_days_of_month is not None and (day_index + 1) in active_days_of_month:
         return True
     return False
 
@@ -173,6 +195,13 @@ def _parse_active_weekdays(active_weekdays_str):
     return days if days else None
 
 
+def _normalize_position_holiday_mode(value):
+    mode = str(value or "all").strip() or "all"
+    if mode not in ("all", "non_holiday_only", "holiday_only"):
+        return "all"
+    return mode
+
+
 def _is_slot_active_on_day(shift, pos, day_index, start_date, holiday_set=None):
     """
     เช็คว่า slot (shift+position) นี้ active ในวันนั้นหรือไม่
@@ -182,13 +211,20 @@ def _is_slot_active_on_day(shift, pos, day_index, start_date, holiday_set=None):
     if not _is_shift_active_on_day(shift, day_index, start_date, holiday_set):
         return False
     aw = _parse_active_weekdays(pos.get("active_weekdays") if isinstance(pos, dict) else None)
-    if aw is None:
-        return True
+    holiday_mode = _normalize_position_holiday_mode(pos.get("holiday_mode") if isinstance(pos, dict) else None)
     if start_date is not None:
         cal_date = start_date + timedelta(days=day_index)
+        is_holiday = bool(holiday_set and cal_date in holiday_set)
         weekday = cal_date.weekday()
     else:
+        is_holiday = False
         weekday = day_index % 7
+    if holiday_mode == "non_holiday_only" and is_holiday:
+        return False
+    if holiday_mode == "holiday_only" and not is_holiday:
+        return False
+    if aw is None:
+        return True
     return weekday in aw
 
 
@@ -436,7 +472,31 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
     return reasons
 
 
-def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
+class _ProgressCallback(cp_model.CpSolverSolutionCallback):
+    """Reports solver progress via an optional callback function."""
+
+    def __init__(self, timeout: float, on_progress=None):
+        super().__init__()
+        self._start = time.monotonic()
+        self._timeout = timeout
+        self._on_progress = on_progress
+        self._solutions = 0
+
+    def on_solution_callback(self):
+        self._solutions += 1
+        if self._on_progress:
+            elapsed = time.monotonic() - self._start
+            pct = min(99, int(elapsed / self._timeout * 100)) if self._timeout > 0 else 0
+            self._on_progress({
+                "elapsed": round(elapsed, 1),
+                "timeout": self._timeout,
+                "percent": pct,
+                "solutions": self._solutions,
+                "objective": self.objective_value,
+            })
+
+
+def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on_progress=None):
     mt_list = get_mt_list()
     shift_list = get_shift_list()
     if num_days is None:
@@ -488,6 +548,16 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
                 model.add(
                     sum(assign[(mt["name"], day, shift["name"], pos_name, slot_i)] for mt in all_mt)
                     == 1
+                )
+
+    # แต่ละคน อยู่ได้สูงสุด 1 ตำแหน่งต่อกะต่อวัน (ห้ามอยู่หลาย position ในกะเดียวกัน)
+    for mt in mt_list:
+        for day in range(num_days):
+            for sn, sn_slots in slots_by_shift.items():
+                if len(sn_slots) <= 1:
+                    continue
+                model.add(
+                    sum(assign[(mt["name"], day, sn, pn, si)] for _, _, pn, si in sn_slots) <= 1
                 )
 
     # has_work[mt_name, day] = 1 iff staff works any slot that day
@@ -552,6 +622,41 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
                     for shift, pos, pos_name, slot_i in expanded:
                         model.add(assign[(mt["name"], day, shift["name"], pos_name, slot_i)] == 0)
 
+    # shift_day_rules: [{day: 1..31, allowed_shifts: ["เวรบ่าย", ...]}]
+    for mt in mt_list:
+        raw_rules = mt.get("shift_day_rules") or []
+        if not isinstance(raw_rules, list) or not raw_rules:
+            continue
+        rules_by_day = {}
+        for item in raw_rules:
+            if not isinstance(item, dict):
+                continue
+            try:
+                day_of_month = int(item.get("day"))
+            except Exception:
+                continue
+            if day_of_month < 1 or day_of_month > 31:
+                continue
+            shifts = item.get("allowed_shifts") or []
+            if not isinstance(shifts, list):
+                continue
+            allowed = {str(name).strip() for name in shifts if str(name).strip()}
+            if not allowed:
+                continue
+            if day_of_month not in rules_by_day:
+                rules_by_day[day_of_month] = set()
+            rules_by_day[day_of_month].update(allowed)
+        if not rules_by_day:
+            continue
+        for day in range(num_days):
+            day_of_month = (start_date + timedelta(days=day)).day if start_date else (day + 1)
+            allowed_shifts = rules_by_day.get(day_of_month)
+            if not allowed_shifts:
+                continue
+            for shift, pos, pos_name, slot_i in expanded:
+                if shift["name"] not in allowed_shifts:
+                    model.add(assign[(mt["name"], day, shift["name"], pos_name, slot_i)] == 0)
+
     for shift, pos, pos_name, slot_i in expanded:
         if isinstance(pos, dict) and pos.get("regular_only"):
             for mt in mt_list:
@@ -565,8 +670,9 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
                 for day in range(num_days):
                     model.add(assign[(mt["name"], day, shift["name"], pos_name, slot_i)] == 0)
 
-    # แต่ละกะ: min_fulltime = เจ้าหน้าที่ประจำขั้นต่ำ (รวมทุกช่องในกะ) 0 = ยืดหยุ่น/pt ได้
+    # แต่ละกะ: min_fulltime = เจ้าหน้าที่ประจำขั้นต่ำ (soft constraint — penalty เมื่อไม่ถึง)
     fulltime_mt = [mt for mt in mt_list if mt.get("type") == "fulltime"]
+    min_ft_penalty_terms = []
     if fulltime_mt:
         for shift in shift_list:
             sn = shift["name"]
@@ -579,14 +685,14 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
             for day in range(num_days):
                 if not any(_is_slot_active_on_day(s, p, day, start_date, holiday_set) for s, p, _, _ in slots):
                     continue
-                model.add(
-                    sum(
-                        assign[(mt["name"], day, sn, pos_name, slot_i)]
-                        for mt in fulltime_mt
-                        for _, _, pos_name, slot_i in slots
-                    )
-                    >= min_ft
+                ft_count = sum(
+                    assign[(mt["name"], day, sn, pos_name, slot_i)]
+                    for mt in fulltime_mt
+                    for _, _, pos_name, slot_i in slots
                 )
+                shortfall = model.new_int_var(0, min_ft, f"ft_short_{sn}_d{day}")
+                model.add(shortfall >= min_ft - ft_count)
+                min_ft_penalty_terms.append(shortfall)
 
     for shift in shift_list:
         for pos in shift.get("positions", []):
@@ -611,7 +717,9 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
                     )
                     day += 7
 
-    # min/max shifts per month
+    # min/max shifts per month (min = soft, max = hard)
+    MIN_SHIFT_PENALTY = 200_000  # penalty ต่อเวรที่ขาดจาก min
+    min_shift_penalty_terms = []
     for mt in mt_list:
         total = sum(
             assign[(mt["name"], day, shift["name"], pos_name, slot_i)]
@@ -621,11 +729,14 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
         mn = mt.get("min_shifts_per_month")
         mx = mt.get("max_shifts_per_month")
         if mn and int(mn) > 0:
-            model.add(total >= int(mn))
+            mn_val = int(mn)
+            shortfall = model.new_int_var(0, mn_val, f"min_month_short_{mt['name']}")
+            model.add(shortfall >= mn_val - total)
+            min_shift_penalty_terms.append(shortfall)
         if mx and int(mx) > 0:
             model.add(total <= int(mx))
 
-        # min/max ต่อกะรายคน (shift_limits)
+        # min/max ต่อกะรายคน (min = soft, max = hard)
         shift_limits = mt.get("shift_limits") or {}
         if isinstance(shift_limits, dict):
             for shift_name, lim in shift_limits.items():
@@ -649,7 +760,9 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
                     continue
                 shift_total = sum(shift_terms)
                 if smin is not None and smin > 0:
-                    model.add(shift_total >= smin)
+                    sl_short = model.new_int_var(0, smin, f"sl_short_{mt['name']}_{shift_name}")
+                    model.add(sl_short >= smin - shift_total)
+                    min_shift_penalty_terms.append(sl_short)
                 if smax is not None and smax >= 0:
                     model.add(shift_total <= smax)
 
@@ -890,14 +1003,19 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
         skill_obj = sum(v * c for v, c in skill_pref_terms)
         total_obj = total_obj + skill_obj
 
+    MIN_FT_PENALTY = 500_000
+    ft_obj = sum(min_ft_penalty_terms) * MIN_FT_PENALTY if min_ft_penalty_terms else 0
+    min_shift_obj = sum(min_shift_penalty_terms) * MIN_SHIFT_PENALTY if min_shift_penalty_terms else 0
+
     if dummy_terms:
-        model.minimize(total_obj + sum(dummy_terms) * DUMMY_PENALTY)
+        model.minimize(total_obj + sum(dummy_terms) * DUMMY_PENALTY + ft_obj + min_shift_obj)
     else:
-        model.minimize(total_obj)
+        model.minimize(total_obj + ft_obj + min_shift_obj)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = timeout_seconds
-    status = solver.solve(model)
+    progress_cb = _ProgressCallback(timeout_seconds, on_progress)
+    status = solver.solve(model, progress_cb)
 
     slots = []
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):

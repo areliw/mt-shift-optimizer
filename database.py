@@ -7,6 +7,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -35,6 +36,23 @@ MASTER_DB_PATH = _data_dir / "master.db"
 _workspace_db_path: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "workspace_db_path", default=None
 )
+_migrated_db_paths: set[str] = set()
+_migrate_lock = threading.Lock()
+
+
+def _ensure_db_schema(path: str):
+    """Ensure DB at path has all current migrations applied (once per process)."""
+    if path in _migrated_db_paths:
+        return
+    with _migrate_lock:
+        if path in _migrated_db_paths:
+            return
+        conn = sqlite3.connect(path)
+        try:
+            init_db(conn=conn)
+        finally:
+            conn.close()
+        _migrated_db_paths.add(path)
 
 
 def _validate_workspace_id(wid: str):
@@ -185,7 +203,9 @@ def delete_workspace(wid: str) -> bool:
 def set_workspace_context(wid: str):
     """ตั้ง workspace DB path ใน contextvar (ต้องเรียกจาก async context เพื่อ propagate ไปยัง sync threads)"""
     _validate_workspace_id(wid)
-    _workspace_db_path.set(str(WORKSPACES_DIR / f"{wid}.db"))
+    db_path = str(WORKSPACES_DIR / f"{wid}.db")
+    _ensure_db_schema(db_path)
+    _workspace_db_path.set(db_path)
 
 
 def _migrate_shifts_to_positions(conn):
@@ -279,7 +299,9 @@ def init_db(conn=None):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
                 donor INTEGER NOT NULL DEFAULT 1,
-                xmatch INTEGER NOT NULL DEFAULT 1
+                xmatch INTEGER NOT NULL DEFAULT 1,
+                active_days_of_month TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS schedule_run (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -368,16 +390,48 @@ def init_db(conn=None):
         _migrate_staff_min_gap_days(conn)
         _migrate_staff_min_gap_shifts(conn)
         _migrate_staff_min_gap_rules(conn)
+        _migrate_staff_shift_day_rules(conn)
         _migrate_staff_shift_limits(conn)
         _migrate_shift_include_holidays(conn)
+        _migrate_shift_active_days_of_month(conn)
         _migrate_staff_pair(conn)
         _migrate_staff_pair_shift_names(conn)
         _migrate_shift_position_active_weekdays(conn)
+        _migrate_shift_position_holiday_mode(conn)
         _migrate_shift_position_min_fulltime(conn)
         _migrate_shift_min_fulltime(conn)
+        _migrate_shift_sort_order(conn)
     finally:
         if close:
             conn.close()
+
+
+def _migrate_shift_position_holiday_mode(conn):
+    """ตำแหน่งเปิด/ปิดตามวันหยุดราชการ: all | non_holiday_only | holiday_only"""
+    try:
+        conn.execute("ALTER TABLE shift_position ADD COLUMN holiday_mode TEXT NOT NULL DEFAULT 'all'")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _migrate_shift_sort_order(conn):
+    """เพิ่มคอลัมน์ sort_order ให้ shift และ normalize ลำดับเริ่มต้นตาม id"""
+    try:
+        conn.execute("ALTER TABLE shift ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+    rows = conn.execute("SELECT id, COALESCE(sort_order, 0) FROM shift ORDER BY id").fetchall()
+    if not rows:
+        return
+
+    # ถ้ายังเป็นค่าเริ่มต้นซ้ำกัน (0) ให้จัดใหม่ตาม id เพื่อให้ลำดับ deterministic
+    if len({int(r[1] or 0) for r in rows}) == 1:
+        for idx, (sid, _) in enumerate(rows):
+            conn.execute("UPDATE shift SET sort_order = ? WHERE id = ?", (idx, sid))
+        conn.commit()
 
 
 def _migrate_staff_min_max_shifts(conn):
@@ -417,6 +471,15 @@ def _migrate_staff_min_gap_rules(conn):
         pass
 
 
+def _migrate_staff_shift_day_rules(conn):
+    """เพิ่มคอลัมน์ shift_day_rules ให้ตาราง staff — กฎรายวันแยกกะ (JSON list)"""
+    try:
+        conn.execute("ALTER TABLE staff ADD COLUMN shift_day_rules TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
 def _migrate_staff_shift_limits(conn):
     """เพิ่มคอลัมน์ shift_limits ให้ตาราง staff — min/max เวรแยกตามกะ (JSON: {"กะA": {"min":1,"max":5}})"""
     try:
@@ -433,6 +496,45 @@ def _migrate_shift_include_holidays(conn):
         conn.commit()
     except sqlite3.OperationalError:
         pass
+
+
+def _migrate_shift_active_days_of_month(conn):
+    """เพิ่มคอลัมน์ active_days_of_month ให้ตาราง shift"""
+    try:
+        conn.execute("ALTER TABLE shift ADD COLUMN active_days_of_month TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _serialize_int_csv(values, lower, upper):
+    if values is None:
+        return None
+    if isinstance(values, str):
+        raw_parts = values.split(",")
+    else:
+        raw_parts = values
+    normalized = []
+    seen = set()
+    for item in raw_parts:
+        text = str(item).strip()
+        if not text:
+            continue
+        try:
+            num = int(text)
+        except (TypeError, ValueError):
+            continue
+        if num < lower or num > upper or num in seen:
+            continue
+        seen.add(num)
+        normalized.append(num)
+    return ",".join(str(num) for num in normalized) or None
+
+
+def _parse_int_csv(values, lower, upper):
+    if values is None:
+        return []
+    return [int(part) for part in (_serialize_int_csv(values, lower, upper) or "").split(",") if part]
 
 
 def _migrate_staff_pair(conn):
@@ -961,14 +1063,14 @@ def get_mt_list(conn=None):
     conn = conn or get_connection()
     try:
         rows = conn.execute(
-            "SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts, ''), COALESCE(min_gap_rules, ''), COALESCE(shift_limits, '') FROM staff ORDER BY id"
+            "SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts, ''), COALESCE(min_gap_rules, ''), COALESCE(shift_day_rules, ''), COALESCE(shift_limits, '') FROM staff ORDER BY id"
         ).fetchall()
         if not rows:
             return []
         staff_ids = [r[0] for r in rows]
         off_days_map, off_month_map, skills_map, skill_levels_map, tw_map = _batch_load_staff_data(conn, staff_ids)
         mt_list = []
-        for sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw, shift_limits_raw in rows:
+        for sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw, shift_day_rules_raw, shift_limits_raw in rows:
             try:
                 gap_shifts = json.loads(gap_shifts_raw) if gap_shifts_raw else []
                 if not isinstance(gap_shifts, list):
@@ -995,6 +1097,10 @@ def get_mt_list(conn=None):
                 gap_rules = norm
             except Exception:
                 gap_rules = []
+            try:
+                shift_day_rules = _normalize_shift_day_rules(json.loads(shift_day_rules_raw) if shift_day_rules_raw else [])
+            except Exception:
+                shift_day_rules = []
             try:
                 shift_limits = json.loads(shift_limits_raw) if shift_limits_raw else {}
                 if not isinstance(shift_limits, dict):
@@ -1015,6 +1121,7 @@ def get_mt_list(conn=None):
                 "min_gap_days": gap,
                 "min_gap_shifts": gap_shifts,
                 "min_gap_rules": gap_rules,
+                "shift_day_rules": shift_day_rules,
                 "shift_limits": shift_limits,
             })
         return mt_list
@@ -1028,13 +1135,13 @@ def list_staff(conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        rows = conn.execute("SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts,''), COALESCE(min_gap_rules,''), COALESCE(shift_limits,'') FROM staff ORDER BY id").fetchall()
+        rows = conn.execute("SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts,''), COALESCE(min_gap_rules,''), COALESCE(shift_day_rules,''), COALESCE(shift_limits,'') FROM staff ORDER BY id").fetchall()
         if not rows:
             return []
         staff_ids = [r[0] for r in rows]
         off_days_map, off_month_map, skills_map, skill_levels_map, tw_map = _batch_load_staff_data(conn, staff_ids)
         result = []
-        for sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw, shift_limits_raw in rows:
+        for sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw, shift_day_rules_raw, shift_limits_raw in rows:
             try:
                 gap_shifts = json.loads(gap_shifts_raw) if gap_shifts_raw else []
                 if not isinstance(gap_shifts, list):
@@ -1061,6 +1168,10 @@ def list_staff(conn=None):
                 gap_rules = norm
             except Exception:
                 gap_rules = []
+            try:
+                shift_day_rules = _normalize_shift_day_rules(json.loads(shift_day_rules_raw) if shift_day_rules_raw else [])
+            except Exception:
+                shift_day_rules = []
             result.append(
                 {
                     "id": sid,
@@ -1077,6 +1188,7 @@ def list_staff(conn=None):
                     "min_gap_days": gap,
                     "min_gap_shifts": gap_shifts,
                     "min_gap_rules": gap_rules,
+                    "shift_day_rules": shift_day_rules,
                     "shift_limits": json.loads(shift_limits_raw) if shift_limits_raw else {},
                 }
             )
@@ -1091,10 +1203,10 @@ def get_staff(staff_id: int, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        row = conn.execute("SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts,''), COALESCE(min_gap_rules,''), COALESCE(shift_limits,'') FROM staff WHERE id = ?", (staff_id,)).fetchone()
+        row = conn.execute("SELECT id, name, type, COALESCE(title, ''), min_shifts_per_month, max_shifts_per_month, min_gap_days, COALESCE(min_gap_shifts,''), COALESCE(min_gap_rules,''), COALESCE(shift_day_rules,''), COALESCE(shift_limits,'') FROM staff WHERE id = ?", (staff_id,)).fetchone()
         if not row:
             return None
-        sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw, shift_limits_raw = row
+        sid, name, stype, title, mn, mx, gap, gap_shifts_raw, gap_rules_raw, shift_day_rules_raw, shift_limits_raw = row
         try:
             gap_shifts = json.loads(gap_shifts_raw) if gap_shifts_raw else []
             if not isinstance(gap_shifts, list):
@@ -1121,6 +1233,10 @@ def get_staff(staff_id: int, conn=None):
             gap_rules = norm
         except Exception:
             gap_rules = []
+        try:
+            shift_day_rules = _normalize_shift_day_rules(json.loads(shift_day_rules_raw) if shift_day_rules_raw else [])
+        except Exception:
+            shift_day_rules = []
         off_days = [r[0] for r in conn.execute("SELECT day FROM staff_off_day WHERE staff_id = ? ORDER BY day", (sid,)).fetchall()]
         off_days_of_month = [r[0] for r in conn.execute("SELECT day FROM staff_off_day_of_month WHERE staff_id = ? ORDER BY day", (sid,)).fetchall()]
         skills = [r[0] for r in conn.execute("SELECT skill FROM staff_skill WHERE staff_id = ? ORDER BY skill", (sid,)).fetchall()]
@@ -1132,7 +1248,7 @@ def get_staff(staff_id: int, conn=None):
                 shift_limits = {}
         except Exception:
             shift_limits = {}
-        return {"id": sid, "name": name, "type": stype, "title": title or "", "off_days": off_days, "off_days_of_month": off_days_of_month, "skills": skills, "skill_levels": skill_levels, "time_windows": time_windows, "min_shifts_per_month": mn, "max_shifts_per_month": mx, "min_gap_days": gap, "min_gap_shifts": gap_shifts, "min_gap_rules": gap_rules, "shift_limits": shift_limits}
+        return {"id": sid, "name": name, "type": stype, "title": title or "", "off_days": off_days, "off_days_of_month": off_days_of_month, "skills": skills, "skill_levels": skill_levels, "time_windows": time_windows, "min_shifts_per_month": mn, "max_shifts_per_month": mx, "min_gap_days": gap, "min_gap_shifts": gap_shifts, "min_gap_rules": gap_rules, "shift_day_rules": shift_day_rules, "shift_limits": shift_limits}
     finally:
         if close:
             conn.close()
@@ -1168,7 +1284,42 @@ def _normalize_shift_limits(raw):
     return out
 
 
-def create_staff(name, off_days=None, skills=None, title=None, off_days_of_month=None, time_windows=None, min_shifts_per_month=None, max_shifts_per_month=None, min_gap_days=None, min_gap_shifts=None, min_gap_rules=None, shift_limits=None, conn=None):
+def _normalize_shift_day_rules(raw):
+    """normalize shift_day_rules -> [{day: int, allowed_shifts: [str,...]}]"""
+    if not isinstance(raw, list):
+        return []
+    merged = {}
+    for it in raw:
+        if not isinstance(it, dict):
+            continue
+        try:
+            day = int(it.get("day"))
+        except Exception:
+            continue
+        if day < 1 or day > 31:
+            continue
+        shifts = it.get("allowed_shifts") or []
+        if not isinstance(shifts, list):
+            continue
+        clean = []
+        seen = set()
+        for sn in shifts:
+            name = str(sn or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            clean.append(name)
+        if not clean:
+            continue
+        if day not in merged:
+            merged[day] = []
+        for name in clean:
+            if name not in merged[day]:
+                merged[day].append(name)
+    return [{"day": day, "allowed_shifts": merged[day]} for day in sorted(merged.keys())]
+
+
+def create_staff(name, off_days=None, skills=None, title=None, off_days_of_month=None, time_windows=None, min_shifts_per_month=None, max_shifts_per_month=None, min_gap_days=None, min_gap_shifts=None, min_gap_rules=None, shift_day_rules=None, shift_limits=None, conn=None):
     off_days = off_days or []
     skills = skills or []
     off_days_of_month = off_days_of_month or []
@@ -1188,13 +1339,14 @@ def create_staff(name, off_days=None, skills=None, title=None, off_days_of_month
         if sh and gd > 0:
             norm_gap_rules.append({"shift": sh, "gap_days": gd})
     norm_shift_limits = _normalize_shift_limits(shift_limits)
+    norm_shift_day_rules = _normalize_shift_day_rules(shift_day_rules)
     title = (title or "").strip() or None
     close = conn is None
     conn = conn or get_connection()
     try:
         stype = get_title_type(title or "", conn)
         cur = conn.execute(
-            "INSERT INTO staff (name, type, title, min_shifts_per_month, max_shifts_per_month, min_gap_days, min_gap_shifts, min_gap_rules, shift_limits) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO staff (name, type, title, min_shifts_per_month, max_shifts_per_month, min_gap_days, min_gap_shifts, min_gap_rules, shift_day_rules, shift_limits) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 stype,
@@ -1204,6 +1356,7 @@ def create_staff(name, off_days=None, skills=None, title=None, off_days_of_month
                 min_gap_days,
                 json.dumps(min_gap_shifts, ensure_ascii=False) if min_gap_shifts else None,
                 json.dumps(norm_gap_rules, ensure_ascii=False) if norm_gap_rules else None,
+                json.dumps(norm_shift_day_rules, ensure_ascii=False) if norm_shift_day_rules else None,
                 json.dumps(norm_shift_limits, ensure_ascii=False) if norm_shift_limits else None,
             ),
         )
@@ -1228,7 +1381,7 @@ def create_staff(name, off_days=None, skills=None, title=None, off_days_of_month
             conn.close()
 
 
-def update_staff(sid, name, off_days=None, skills=None, title=None, off_days_of_month=None, time_windows=None, skill_levels=None, min_shifts_per_month=None, max_shifts_per_month=None, min_gap_days=None, min_gap_shifts=None, min_gap_rules=None, shift_limits=None, conn=None):
+def update_staff(sid, name, off_days=None, skills=None, title=None, off_days_of_month=None, time_windows=None, skill_levels=None, min_shifts_per_month=None, max_shifts_per_month=None, min_gap_days=None, min_gap_shifts=None, min_gap_rules=None, shift_day_rules=None, shift_limits=None, conn=None):
     off_days = off_days or []
     skills = skills or []
     off_days_of_month = off_days_of_month or []
@@ -1249,13 +1402,14 @@ def update_staff(sid, name, off_days=None, skills=None, title=None, off_days_of_
         if sh and gd > 0:
             norm_gap_rules.append({"shift": sh, "gap_days": gd})
     norm_shift_limits = _normalize_shift_limits(shift_limits)
+    norm_shift_day_rules = _normalize_shift_day_rules(shift_day_rules)
     title = (title or "").strip() or None
     close = conn is None
     conn = conn or get_connection()
     try:
         stype = get_title_type(title or "", conn)
         conn.execute(
-            "UPDATE staff SET name = ?, type = ?, title = ?, min_shifts_per_month = ?, max_shifts_per_month = ?, min_gap_days = ?, min_gap_shifts = ?, min_gap_rules = ?, shift_limits = ? WHERE id = ?",
+            "UPDATE staff SET name = ?, type = ?, title = ?, min_shifts_per_month = ?, max_shifts_per_month = ?, min_gap_days = ?, min_gap_shifts = ?, min_gap_rules = ?, shift_day_rules = ?, shift_limits = ? WHERE id = ?",
             (
                 name,
                 stype,
@@ -1265,6 +1419,7 @@ def update_staff(sid, name, off_days=None, skills=None, title=None, off_days_of_
                 min_gap_days,
                 json.dumps(min_gap_shifts, ensure_ascii=False) if min_gap_shifts else None,
                 json.dumps(norm_gap_rules, ensure_ascii=False) if norm_gap_rules else None,
+                json.dumps(norm_shift_day_rules, ensure_ascii=False) if norm_shift_day_rules else None,
                 json.dumps(norm_shift_limits, ensure_ascii=False) if norm_shift_limits else None,
                 sid,
             ),
@@ -1309,13 +1464,17 @@ def list_shifts(conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        rows = conn.execute("SELECT id, name, donor, xmatch, active_days, COALESCE(include_holidays,0), COALESCE(min_fulltime,0) FROM shift ORDER BY id").fetchall()
+        rows = conn.execute(
+            "SELECT id, name, donor, xmatch, active_days, COALESCE(include_holidays,0), COALESCE(sort_order, 0), active_days_of_month "
+            "FROM shift ORDER BY COALESCE(sort_order, 0), id"
+        ).fetchall()
         result = []
         for r in rows:
             sid, name, donor, xmatch = r[0], r[1], r[2], r[3]
             active_days = r[4] if len(r) > 4 else None
             include_holidays = bool(r[5]) if len(r) > 5 else False
-            min_fulltime = int(r[6] or 0) if len(r) > 6 else 0
+            sort_order = int(r[6] or 0) if len(r) > 6 else 0
+            active_days_of_month = _parse_int_csv(r[7] if len(r) > 7 else None, 1, 31)
             pos_rows = conn.execute(
                 """
                 SELECT
@@ -1328,7 +1487,8 @@ def list_shifts(conn=None):
                     COALESCE(min_skill_level, 0),
                     COALESCE(allowed_titles, '[]'),
                     COALESCE(max_per_week, 0),
-                    active_weekdays
+                    active_weekdays,
+                    COALESCE(holiday_mode, 'all')
                 FROM shift_position
                 WHERE shift_id = ?
                 ORDER BY sort_order
@@ -1348,6 +1508,7 @@ def list_shifts(conn=None):
                     allowed_raw = p[7] if len(p) > 7 else "[]"
                     mpw_p = int(p[8] or 0) if len(p) > 8 else 0
                     aw_p = (p[9] if len(p) > 9 and p[9] else None) or ""
+                    holiday_mode_p = (p[10] if len(p) > 10 and p[10] else None) or "all"
                     try:
                         allowed_list = json.loads(allowed_raw or "[]")
                     except Exception:
@@ -1364,9 +1525,10 @@ def list_shifts(conn=None):
                             "allowed_titles": allowed_list,
                             "max_per_week": mpw_p,
                             "active_weekdays": aw_p or None,
+                            "holiday_mode": holiday_mode_p,
                         }
                     )
-                result.append({"id": sid, "name": name, "positions": positions, "active_days": active_days, "include_holidays": include_holidays, "min_fulltime": min_fulltime})
+                result.append({"id": sid, "name": name, "positions": positions, "active_days": active_days, "active_days_of_month": active_days_of_month, "include_holidays": include_holidays, "sort_order": sort_order})
             else:
                 result.append({
                     "id": sid,
@@ -1376,8 +1538,9 @@ def list_shifts(conn=None):
                     "positions": [{"name": "Donor", "constraint_note": "", "regular_only": False}] * donor
                     + [{"name": "Xmatch", "constraint_note": "", "regular_only": False}] * xmatch,
                     "active_days": active_days,
+                    "active_days_of_month": active_days_of_month,
                     "include_holidays": include_holidays,
-                    "min_fulltime": min_fulltime,
+                    "sort_order": sort_order,
                 })
         return result
     finally:
@@ -1397,18 +1560,25 @@ def _insert_position(conn, shift_id, index, p):
     allowed_json = json.dumps(allowed, ensure_ascii=False) if allowed else None
     mpw = max(0, int(p.get("max_per_week") or 0))
     aw = (p.get("active_weekdays") or "").strip() or None
+    holiday_mode = (p.get("holiday_mode") or "all").strip() or "all"
+    if holiday_mode not in ("all", "non_holiday_only", "holiday_only"):
+        holiday_mode = "all"
     conn.execute(
-        "INSERT INTO shift_position (shift_id, name, sort_order, constraint_note, regular_only, slot_count, time_window_name, required_skill, min_skill_level, allowed_titles, max_per_week, active_weekdays) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (shift_id, nm, index, note, reg, cnt, tw, req_skill, min_lvl, allowed_json, mpw, aw),
+        "INSERT INTO shift_position (shift_id, name, sort_order, constraint_note, regular_only, slot_count, time_window_name, required_skill, min_skill_level, allowed_titles, max_per_week, active_weekdays, holiday_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (shift_id, nm, index, note, reg, cnt, tw, req_skill, min_lvl, allowed_json, mpw, aw, holiday_mode),
     )
 
 
-def create_shift(name, donor=1, xmatch=1, positions=None, active_days=None, include_holidays=False, min_fulltime=0, conn=None):
+def create_shift(name, donor=1, xmatch=1, positions=None, active_days=None, active_days_of_month=None, include_holidays=False, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        min_ft = max(0, int(min_fulltime or 0))
-        cur = conn.execute("INSERT INTO shift (name, donor, xmatch, active_days, include_holidays, min_fulltime) VALUES (?, ?, ?, ?, ?, ?)", (name, donor, xmatch, active_days or None, 1 if include_holidays else 0, min_ft))
+        next_order_row = conn.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM shift").fetchone()
+        next_order = int(next_order_row[0] or 0) if next_order_row else 0
+        cur = conn.execute(
+            "INSERT INTO shift (name, donor, xmatch, active_days, include_holidays, sort_order, active_days_of_month) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name, donor, xmatch, _serialize_int_csv(active_days, 0, 6), 1 if include_holidays else 0, next_order, _serialize_int_csv(active_days_of_month, 1, 31)),
+        )
         sid = cur.lastrowid
         if positions:
             for i, p in enumerate(positions):
@@ -1420,12 +1590,11 @@ def create_shift(name, donor=1, xmatch=1, positions=None, active_days=None, incl
             conn.close()
 
 
-def update_shift(sid, name, donor=1, xmatch=1, positions=None, active_days=None, include_holidays=False, min_fulltime=0, conn=None):
+def update_shift(sid, name, donor=1, xmatch=1, positions=None, active_days=None, active_days_of_month=None, include_holidays=False, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        min_ft = max(0, int(min_fulltime or 0))
-        conn.execute("UPDATE shift SET name = ?, donor = ?, xmatch = ?, active_days = ?, include_holidays = ?, min_fulltime = ? WHERE id = ?", (name, donor, xmatch, active_days or None, 1 if include_holidays else 0, min_ft, sid))
+        conn.execute("UPDATE shift SET name = ?, donor = ?, xmatch = ?, active_days = ?, include_holidays = ?, active_days_of_month = ? WHERE id = ?", (name, donor, xmatch, _serialize_int_csv(active_days, 0, 6), 1 if include_holidays else 0, _serialize_int_csv(active_days_of_month, 1, 31), sid))
         conn.execute("DELETE FROM shift_position WHERE shift_id = ?", (sid,))
         if positions:
             for i, p in enumerate(positions):
@@ -1441,7 +1610,41 @@ def delete_shift(sid, conn=None):
     conn = conn or get_connection()
     try:
         conn.execute("DELETE FROM shift WHERE id = ?", (sid,))
+        # Resequence to keep order compact after deletion
+        rows = conn.execute("SELECT id FROM shift ORDER BY COALESCE(sort_order, 0), id").fetchall()
+        for idx, (shift_id,) in enumerate(rows):
+            conn.execute("UPDATE shift SET sort_order = ? WHERE id = ?", (idx, shift_id))
         conn.commit()
+    finally:
+        if close:
+            conn.close()
+
+
+def move_shift(sid: int, direction: str, conn=None) -> bool:
+    """Move shift order up/down. Returns True if moved, False if already at edge."""
+    close = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = conn.execute("SELECT id FROM shift ORDER BY COALESCE(sort_order, 0), id").fetchall()
+        ids = [int(r[0]) for r in rows]
+        if int(sid) not in ids:
+            raise ValueError("ไม่พบกะที่ต้องการเลื่อน")
+        i = ids.index(int(sid))
+        if direction == "up":
+            if i == 0:
+                return False
+            ids[i - 1], ids[i] = ids[i], ids[i - 1]
+        elif direction == "down":
+            if i >= len(ids) - 1:
+                return False
+            ids[i + 1], ids[i] = ids[i], ids[i + 1]
+        else:
+            raise ValueError("direction ต้องเป็น 'up' หรือ 'down'")
+
+        for idx, shift_id in enumerate(ids):
+            conn.execute("UPDATE shift SET sort_order = ? WHERE id = ?", (idx, shift_id))
+        conn.commit()
+        return True
     finally:
         if close:
             conn.close()
@@ -1631,31 +1834,34 @@ def get_shift_list(conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        rows = conn.execute("SELECT id, name, donor, xmatch, active_days, COALESCE(include_holidays,0), COALESCE(min_fulltime,0) FROM shift ORDER BY id").fetchall()
+        rows = conn.execute(
+            "SELECT id, name, donor, xmatch, active_days, COALESCE(include_holidays,0), active_days_of_month "
+            "FROM shift ORDER BY COALESCE(sort_order, 0), id"
+        ).fetchall()
         result = []
         for r in rows:
             sid, name, donor, xmatch = r[0], r[1], r[2], r[3]
             active_days = r[4] if len(r) > 4 else None
             include_holidays = bool(r[5]) if len(r) > 5 else False
-            min_fulltime = int(r[6] or 0) if len(r) > 6 else 0
+            active_days_of_month = _parse_int_csv(r[6] if len(r) > 6 else None, 1, 31)
             pos_rows = conn.execute(
-                "SELECT name, regular_only, COALESCE(slot_count, 1), time_window_name, COALESCE(required_skill,''), COALESCE(min_skill_level,0), COALESCE(allowed_titles,'[]'), COALESCE(max_per_week,0), active_weekdays FROM shift_position WHERE shift_id = ? ORDER BY sort_order",
+                "SELECT name, regular_only, COALESCE(slot_count, 1), time_window_name, COALESCE(required_skill,''), COALESCE(min_skill_level,0), COALESCE(allowed_titles,'[]'), COALESCE(max_per_week,0), active_weekdays, COALESCE(holiday_mode,'all') FROM shift_position WHERE shift_id = ? ORDER BY sort_order",
                 (sid,),
             ).fetchall()
             if pos_rows:
                 result.append({
                     "name": name,
                     "active_days": active_days,
+                    "active_days_of_month": active_days_of_month,
                     "include_holidays": include_holidays,
-                    "min_fulltime": min_fulltime,
-                    "positions": [{"name": p[0], "regular_only": bool(p[1]), "slot_count": int(p[2]), "time_window_name": (p[3] if len(p) > 3 and p[3] else None) or "", "required_skill": p[4] or "", "min_skill_level": int(p[5] or 0), "allowed_titles": json.loads(p[6] or "[]"), "max_per_week": int(p[7] or 0), "active_weekdays": (p[8] if len(p) > 8 and p[8] else None) or None} for p in pos_rows],
+                    "positions": [{"name": p[0], "regular_only": bool(p[1]), "slot_count": int(p[2]), "time_window_name": (p[3] if len(p) > 3 and p[3] else None) or "", "required_skill": p[4] or "", "min_skill_level": int(p[5] or 0), "allowed_titles": json.loads(p[6] or "[]"), "max_per_week": int(p[7] or 0), "active_weekdays": (p[8] if len(p) > 8 and p[8] else None) or None, "holiday_mode": (p[9] if len(p) > 9 and p[9] else None) or "all"} for p in pos_rows],
                 })
             else:
                 result.append({
                     "name": name,
                     "active_days": active_days,
+                    "active_days_of_month": active_days_of_month,
                     "include_holidays": include_holidays,
-                    "min_fulltime": min_fulltime,
                     "donor": donor,
                     "xmatch": xmatch,
                     "positions": [{"name": "Donor", "regular_only": False}] * donor + [{"name": "Xmatch", "regular_only": False}] * xmatch,
@@ -2262,7 +2468,7 @@ _TEMPLATE_6_DATA = {
         {
             "name": "ห้อง X-match ดึก",
             "positions": [{"name": "X-match", "constraint_note": "", "regular_only": False, "slot_count": 2, "time_window_name": "00:00-08:00", "required_skill": "X-match", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None}],
-            "active_days": None, "include_holidays": True, "min_fulltime": 1,
+            "active_days": None, "include_holidays": True,
         },
         {
             "name": "ห้อง X-match เช้า",
@@ -2272,7 +2478,7 @@ _TEMPLATE_6_DATA = {
                 {"name": "ประสานงาน (ผู้ตรวจการ)", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "08:00-16:00", "required_skill": "ประสานงาน (ผู้ตรวจการ)", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
                 {"name": "X-match", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "08:00-16:00", "required_skill": "X-match", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
             ],
-            "active_days": "5,6", "include_holidays": True, "min_fulltime": 1,
+            "active_days": "5,6", "include_holidays": True,
         },
         {
             "name": "ห้อง X-match บ่าย",
@@ -2281,7 +2487,7 @@ _TEMPLATE_6_DATA = {
                 {"name": "จ่ายเลือด", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "16:00-24:00", "required_skill": "จ่ายเลือด", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
                 {"name": "ประสานงาน (ผู้ตรวจการ)", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "16:00-24:00", "required_skill": "ประสานงาน (ผู้ตรวจการ)", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
             ],
-            "active_days": None, "include_holidays": False, "min_fulltime": 1,
+            "active_days": None, "include_holidays": False,
         },
         {
             "name": "ห้อง Donor บ่าย",
@@ -2290,7 +2496,7 @@ _TEMPLATE_6_DATA = {
                 {"name": "เช็ค + รับบริจาค", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "16:00-24:00", "required_skill": "เช็ค + รับบริจาค", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
                 {"name": "รับบริจาค", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "16:00-24:00", "required_skill": "รับบริจาค", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
             ],
-            "active_days": "0,1,2,3,4", "include_holidays": False, "min_fulltime": 1,
+            "active_days": "0,1,2,3,4", "include_holidays": False,
         },
         {
             "name": "ห้อง Donor เช้า",
@@ -2300,7 +2506,7 @@ _TEMPLATE_6_DATA = {
                 {"name": "สำรองปั่น + ลงเอกสารคุณภาพห้องเจาะปั่น", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "08:00-16:00", "required_skill": "สำรองปั่น +ลงเอกสารคุณภาพห้องเจาะปั่น", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
                 {"name": "ปั่น", "constraint_note": "", "regular_only": False, "slot_count": 1, "time_window_name": "08:00-16:00", "required_skill": "ปั่น", "min_skill_level": 0, "allowed_titles": [], "max_per_week": 0, "active_weekdays": None},
             ],
-            "active_days": "5,6", "include_holidays": True, "min_fulltime": 1,
+            "active_days": "5,6", "include_holidays": True,
         },
     ],
     "pairs": [
@@ -2559,6 +2765,8 @@ def import_all_data(data, conn=None):
                 min_gap_days=st.get("min_gap_days"),
                 min_gap_shifts=st.get("min_gap_shifts", []),
                 min_gap_rules=st.get("min_gap_rules", []),
+                shift_day_rules=st.get("shift_day_rules", []),
+                shift_limits=st.get("shift_limits", {}),
                 conn=conn,
             )
             skill_levels = st.get("skill_levels") or {}
@@ -2570,8 +2778,8 @@ def import_all_data(data, conn=None):
                 sh["name"],
                 positions=sh.get("positions"),
                 active_days=sh.get("active_days"),
+                active_days_of_month=sh.get("active_days_of_month", []),
                 include_holidays=sh.get("include_holidays", False),
-                min_fulltime=sh.get("min_fulltime", 0),
                 conn=conn,
             )
         for p in (data.get("pairs") or []):

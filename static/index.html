@@ -164,6 +164,8 @@
       </header>
       <section class="card">
         <h2>เพิ่มบุคลากร</h2>
+        <details class="staff-add-collapse" open>
+          <summary class="staff-add-collapse-summary">พับ/ขยายฟอร์มเพิ่มบุคลากร</summary>
         <fieldset class="form-section">
           <legend>ข้อมูลพื้นฐาน</legend>
           <div class="form-inline">
@@ -176,18 +178,6 @@
         </fieldset>
         <fieldset class="form-section">
           <legend>วันหยุด</legend>
-          <div class="form-group staff-off-days-wrap" style="margin-top:0">
-            <label>ประจำสัปดาห์</label>
-            <div id="staff_add_off_days" class="staff-off-days-checkboxes" aria-label="เลือกวันหยุด">
-              <label class="staff-day-cb"><input type="checkbox" name="staff_add_off_day" value="0" /> จ</label>
-              <label class="staff-day-cb"><input type="checkbox" name="staff_add_off_day" value="1" /> อ</label>
-              <label class="staff-day-cb"><input type="checkbox" name="staff_add_off_day" value="2" /> พ</label>
-              <label class="staff-day-cb"><input type="checkbox" name="staff_add_off_day" value="3" /> พฤ</label>
-              <label class="staff-day-cb"><input type="checkbox" name="staff_add_off_day" value="4" /> ศ</label>
-              <label class="staff-day-cb"><input type="checkbox" name="staff_add_off_day" value="5" /> ส</label>
-              <label class="staff-day-cb"><input type="checkbox" name="staff_add_off_day" value="6" /> อา</label>
-            </div>
-          </div>
           <div class="form-group staff-off-days-of-month-wrap" style="margin-top:.5rem">
             <div class="month-mode-toggle">
               <label class="month-mode-label">
@@ -198,9 +188,19 @@
               </label>
             </div>
             <label for="staff_add_off_days_of_month" id="staff_add_month_label">รายเดือน (วันที่)</label>
-            <input type="text" id="staff_add_off_days_of_month" placeholder="เช่น 1, 15, 31" aria-label="วันที่ของเดือน" style="max-width:16rem" />
+            <input type="text" id="staff_add_off_days_of_month" class="staff-month-input" placeholder="คลิกเลือกวันที่จากปฏิทิน" aria-label="วันที่ของเดือน" readonly style="max-width:16rem" />
+            <div id="staff_add_month_hint" class="text-muted staff-month-help"></div>
+            <div id="staff_add_off_days_of_month_calendar"></div>
           </div>
         </fieldset>
+        <details class="form-section shift-day-rules-section shift-day-rules-collapse" open>
+          <summary class="shift-day-rules-summary">ข้อยกเว้นรายวันแยกกะ</summary>
+          <div class="form-group shift-day-rules-wrap" style="margin-top:0">
+            <label class="text-muted" style="font-size:.82rem">เช่น วันที่ 27 อนุญาตเฉพาะเวรบ่าย/ดึก (กะอื่นจะไม่ถูกจัดในวันนั้น)</label>
+            <div id="staff_add_shift_day_rules" class="shift-day-rules-list"></div>
+            <button type="button" id="staff_add_shift_day_rule_add" class="small shift-day-rules-add-btn">+ เพิ่มกฎรายวัน</button>
+          </div>
+        </details>
         <fieldset class="form-section">
           <legend>จำนวนกะ / เดือน</legend>
           <div class="form-inline" style="margin-bottom:0">
@@ -241,6 +241,7 @@
           </div>
         </fieldset>
         <button type="button" id="add_staff" class="btn-primary" style="margin-top:.75rem">+ เพิ่มบุคลากร</button>
+        </details>
       </section>
 
       <section class="card">
@@ -286,29 +287,25 @@
               <button type="button" id="shift_edit_cancel" class="btn-secondary small">ยกเลิก</button>
             </span>
           </div>
-          <div class="form-inline" style="margin-top:.5rem">
-            <label for="shift_active_days">วันที่กะนี้เปิด (0=จ … 6=อา)</label>
-            <input type="text" id="shift_active_days" placeholder="เช่น 5,6 = เสาร์-อาทิตย์ หรือ 0,1,2,3,4 = จ-ศ (ว่าง=ทุกวัน)" style="width:22rem" />
-            <label class="staff-day-cb" style="margin-left:.5rem">
-              <input type="checkbox" id="shift_include_holidays" /> รวมวันหยุดราชการ
+          <div class="form-group shift-active-days-of-month-wrap" style="margin-top:.5rem">
+            <label for="shift_active_days_of_month_summary">วันที่ของเดือน (1-31)</label>
+            <input type="text" id="shift_active_days_of_month_summary" class="staff-month-input" placeholder="คลิกเลือกวันที่จากปุ่มด้านล่าง" readonly style="max-width:16rem" />
+            <input type="hidden" id="shift_active_days_of_month" />
+            <div id="shift_active_days_of_month_calendar"></div>
+            <label class="shift-include-holidays-pill">
+              <input type="checkbox" id="shift_include_holidays" />
+              <span class="shift-include-holidays-copy">
+                <strong>รวมวันหยุดราชการ</strong>
+                <small>วันที่หยุดที่ตั้งไว้จะถือว่าเปิดกะนี้เพิ่มทันที</small>
+              </span>
             </label>
-            <label for="shift_min_fulltime" style="margin-left:.75rem">เจ้าหน้าที่ประจำขั้นต่ำ</label>
-            <select id="shift_min_fulltime" title="เต็มเวลาขั้นต่ำรวมทุกช่องในกะ (0 = ยืดหยุ่น)">
-              <option value="0">ยืดหยุ่น</option>
-              <option value="1">≥1 คน</option>
-              <option value="2">≥2 คน</option>
-              <option value="3">≥3 คน</option>
-              <option value="4">≥4 คน</option>
-              <option value="5">≥5 คน</option>
-            </select>
           </div>
-          <details class="shift-help" style="margin-top:.5rem">
-            <summary class="shift-help-summary">วิธีใช้</summary>
+          <details class="shift-help" open style="margin-top:.5rem">
+            <summary class="shift-help-summary">วิธีใช้แบบเร็ว (3 จุดสำคัญ)</summary>
             <ul class="shift-help-list">
-              <li><strong>รวมเสาร์–อาทิตย์:</strong> ใส่ <code>5,6</code> = เปิดเฉพาะเสาร์–อาทิตย์ (0=จ … 6=อา)</li>
-              <li><code>0,1,2,3,4</code> = จ–ศ, ว่าง = เปิดทุกวัน</li>
-              <li><strong>รวมวันหยุดราชการ:</strong> เปิดในวันหยุดที่ตั้งไว้ <em>เพิ่มจาก</em> เลขวันด้านบน</li>
-              <li><strong>วันเดียวกันหลายกะ:</strong> ระบบจัดคนแยกกันต่อกะ ไม่ชนกัน</li>
+              <li><strong>ทำอะไร:</strong> เลือกวันที่ 1-31 ที่ต้องการให้กะนี้เปิด และจัดลำดับช่องในกะตามคอลัมน์ที่อยากเห็น</li>
+              <li><strong>เมื่อไหร่:</strong> ถ้าต้องการให้กะเปิดเพิ่มในวันหยุดราชการ ให้เปิดสวิตช์ <strong>รวมวันหยุดราชการ</strong></li>
+              <li><strong>ผลลัพธ์:</strong> ตอนสร้างตาราง ระบบจะเปิดกะตามวันที่ที่เลือก (รวมวันหยุดถ้าเปิดสวิตช์) และเรียงคอลัมน์ตามลำดับช่องที่ตั้งไว้</li>
             </ul>
           </details>
           <div class="positions-editor">

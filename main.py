@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, APIRouter, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
@@ -66,6 +66,7 @@ from database import (
     create_shift,
     update_shift,
     delete_shift,
+    move_shift,
     create_shift_from_template,
     apply_template,
     clear_all,
@@ -277,6 +278,7 @@ class StaffCreate(BaseModel):
     min_gap_days: int | None = None
     min_gap_shifts: list[str] = []
     min_gap_rules: list[dict] = []
+    shift_day_rules: list[dict] = []
     shift_limits: dict[str, dict[str, int | None]] = {}
 
     @field_validator("name")
@@ -308,6 +310,7 @@ class StaffUpdate(BaseModel):
     min_gap_days: int | None = None
     min_gap_shifts: list[str] = []
     min_gap_rules: list[dict] = []
+    shift_day_rules: list[dict] = []
     shift_limits: dict[str, dict[str, int | None]] = {}
 
     @field_validator("name")
@@ -337,11 +340,20 @@ class PositionItem(BaseModel):
     allowed_titles: list[str] = []  # ฉายาที่อนุญาต (ว่าง = ทุกฉายา)
     max_per_week: int = 0  # สูงสุดกี่ครั้ง/สัปดาห์ (0 = ไม่จำกัด)
     active_weekdays: str | None = None  # เปิดเฉพาะวัน (0=จ … 6=อา) เช่น "6" = อาทิตย์เท่านั้น ว่าง = ทุกวันที่กะเปิด
+    holiday_mode: str = "all"  # all | non_holiday_only | holiday_only
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
         return _validate_display_name(v, "ชื่อตำแหน่ง")
+
+    @field_validator("holiday_mode")
+    @classmethod
+    def validate_holiday_mode(cls, v: str) -> str:
+        mode = (v or "all").strip() or "all"
+        if mode not in ("all", "non_holiday_only", "holiday_only"):
+            return "all"
+        return mode
 
 
 class TimeWindowCreate(BaseModel):
@@ -380,13 +392,18 @@ class ShiftCreate(BaseModel):
     xmatch: int = 0
     positions: list[PositionItem] | None = None
     active_days: str | None = None
+    active_days_of_month: list[int] = []
     include_holidays: bool = False
-    min_fulltime: int = 0
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
         return _validate_display_name(v, "ชื่อกะ")
+
+    @field_validator("active_days_of_month", mode="before")
+    @classmethod
+    def validate_active_days_of_month(cls, v: list) -> list:
+        return [int(d) for d in v if 1 <= int(d) <= 31]
 
 
 class ShiftUpdate(BaseModel):
@@ -395,13 +412,22 @@ class ShiftUpdate(BaseModel):
     xmatch: int = 0
     positions: list[PositionItem] | None = None
     active_days: str | None = None
+    active_days_of_month: list[int] = []
     include_holidays: bool = False
-    min_fulltime: int = 0
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
         return _validate_display_name(v, "ชื่อกะ")
+
+    @field_validator("active_days_of_month", mode="before")
+    @classmethod
+    def validate_active_days_of_month(cls, v: list) -> list:
+        return [int(d) for d in v if 1 <= int(d) <= 31]
+
+
+class ShiftMoveBody(BaseModel):
+    direction: str  # "up" | "down"
 
 
 class NumDaysUpdate(BaseModel):
@@ -533,6 +559,7 @@ def api_create_staff(body: StaffCreate):
             min_gap_days=body.min_gap_days,
             min_gap_shifts=body.min_gap_shifts,
             min_gap_rules=body.min_gap_rules,
+            shift_day_rules=body.shift_day_rules,
             shift_limits=body.shift_limits,
         )
     except sqlite3.IntegrityError:
@@ -559,6 +586,7 @@ def api_update_staff(staff_id: int, body: StaffUpdate):
             min_gap_days=body.min_gap_days,
             min_gap_shifts=body.min_gap_shifts,
             min_gap_rules=body.min_gap_rules,
+            shift_day_rules=body.shift_day_rules,
             shift_limits=body.shift_limits,
         )
     except sqlite3.IntegrityError:
@@ -665,9 +693,9 @@ def api_list_shifts():
 def api_create_shift(body: ShiftCreate):
     positions = None
     if body.positions is not None:
-        positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0)), "active_weekdays": (p.active_weekdays or "").strip() or None} for p in body.positions]
+        positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0)), "active_weekdays": (p.active_weekdays or "").strip() or None, "holiday_mode": (p.holiday_mode or "all").strip() or "all"} for p in body.positions]
     try:
-        sid = create_shift(body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, include_holidays=body.include_holidays, min_fulltime=body.min_fulltime)
+        sid = create_shift(body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, active_days_of_month=body.active_days_of_month, include_holidays=body.include_holidays)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="ชื่อกะซ้ำ มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
     out = {"id": sid, "name": body.name}
@@ -712,9 +740,9 @@ def api_clear_all():
 def api_update_shift(shift_id: int, body: ShiftUpdate):
     positions = None
     if body.positions is not None:
-        positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0)), "active_weekdays": (p.active_weekdays or "").strip() or None} for p in body.positions]
+        positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0)), "active_weekdays": (p.active_weekdays or "").strip() or None, "holiday_mode": (p.holiday_mode or "all").strip() or "all"} for p in body.positions]
     try:
-        update_shift(shift_id, body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, include_holidays=body.include_holidays, min_fulltime=body.min_fulltime)
+        update_shift(shift_id, body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, active_days_of_month=body.active_days_of_month, include_holidays=body.include_holidays)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="ชื่อกะซ้ำ มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
     out = {"id": shift_id, "name": body.name}
@@ -730,6 +758,18 @@ def api_update_shift(shift_id: int, body: ShiftUpdate):
 def api_delete_shift(shift_id: int):
     delete_shift(shift_id)
     return {"ok": True}
+
+
+@ws_router.post("/api/shifts/{shift_id:int}/move")
+def api_move_shift(shift_id: int, body: ShiftMoveBody):
+    direction = (body.direction or "").strip().lower()
+    if direction not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="direction ต้องเป็น 'up' หรือ 'down'")
+    try:
+        moved = move_shift(shift_id, direction)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"ok": True, "moved": moved}
 
 
 # --- API: Settings ---
@@ -830,6 +870,87 @@ def api_run_schedule(
 
     logger.info("Schedule run_id=%d saved (slots=%d dummy=%d multi_shift=%d)", run_id, len(slots), len(dummy_slots), len(multi_shift_cases))
     return result
+
+
+@ws_router.get("/api/schedule/run/stream")
+def api_run_schedule_stream(
+    num_days_q: int | None = Query(None, alias="num_days"),
+    schedule_start_date_q: str | None = Query(None, alias="schedule_start_date"),
+):
+    """SSE endpoint: streams solver progress then final result."""
+    import json as _json, queue as _queue, threading as _threading
+
+    num_days_val = num_days_q
+    start_val = schedule_start_date_q.strip() if schedule_start_date_q and schedule_start_date_q.strip() else None
+    if num_days_val is not None:
+        set_num_days(num_days_val)
+    if start_val is not None:
+        set_schedule_start_date(start_val)
+    num_days = num_days_val or get_num_days()
+    mt_list_check = get_mt_list()
+    shift_list_check = get_shift_list()
+    if not mt_list_check:
+        raise HTTPException(status_code=400, detail="No staff.")
+    if not shift_list_check:
+        raise HTTPException(status_code=400, detail="No shifts.")
+    start_date_str = get_schedule_start_date()
+
+    progress_q: _queue.Queue = _queue.Queue()
+
+    def _on_progress(info):
+        progress_q.put(("progress", info))
+
+    def _solver_thread():
+        try:
+            slots, solver_obj, status = generate_schedule(
+                num_days=num_days, start_date_str=start_date_str or None, on_progress=_on_progress,
+            )
+            progress_q.put(("done", (slots, status)))
+        except Exception as exc:
+            progress_q.put(("error", str(exc)))
+
+    _threading.Thread(target=_solver_thread, daemon=True).start()
+
+    def _event_stream():
+        from ortools.sat.python import cp_model as _cp
+        while True:
+            try:
+                kind, data = progress_q.get(timeout=1)
+            except _queue.Empty:
+                yield "event: ping\ndata: {}\n\n"
+                continue
+            if kind == "progress":
+                yield f"event: progress\ndata: {_json.dumps(data)}\n\n"
+            elif kind == "error":
+                yield f"event: error\ndata: {_json.dumps({'message': data})}\n\n"
+                return
+            elif kind == "done":
+                slots, status = data
+                if status not in (_cp.OPTIMAL, _cp.FEASIBLE):
+                    reasons = diagnose_infeasible(get_mt_list(), get_shift_list(), num_days, start_date_str)
+                    yield f"event: error\ndata: {_json.dumps({'message': 'Solver could not find any solution.', 'reasons': reasons})}\n\n"
+                    return
+                start_date = get_schedule_start_date()
+                run_id = save_schedule(num_days, slots, start_date=start_date)
+                sched_data = get_schedule(run_id)
+                dummy_slots = [s for s in slots if s.get("is_dummy")]
+                real_slots = [s for s in slots if not s.get("is_dummy")]
+                result = {"run_id": run_id, "schedule": sched_data, "has_dummy": bool(dummy_slots), "dummy_count": len(dummy_slots)}
+                if dummy_slots:
+                    result["infeasibility_hints"] = diagnose_infeasible(get_mt_list(), get_shift_list(), num_days, start_date_str)
+                day_counts = collections.Counter((s["staff_name"], s["day"]) for s in real_slots)
+                multi = {k: v for k, v in day_counts.items() if v > 1}
+                result["multi_shift_count"] = len(multi)
+                if multi:
+                    result["multi_shift_details"] = [
+                        {"staff_name": n, "day": d, "shifts_on_day": c}
+                        for (n, d), c in sorted(multi.items(), key=lambda x: (x[0][1], x[0][0]))
+                    ]
+                yield f"event: progress\ndata: {_json.dumps({'percent': 100, 'solutions': 0})}\n\n"
+                yield f"event: result\ndata: {_json.dumps(result)}\n\n"
+                return
+
+    return StreamingResponse(_event_stream(), media_type="text/event-stream")
 
 
 @ws_router.get("/api/schedule/latest")
