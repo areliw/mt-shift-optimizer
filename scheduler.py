@@ -670,28 +670,42 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
                 for day in range(num_days):
                     model.add(assign[(mt["name"], day, shift["name"], pos_name, slot_i)] == 0)
 
-    # แต่ละกะ: min_fulltime = เจ้าหน้าที่ประจำขั้นต่ำ (soft constraint — penalty เมื่อไม่ถึง)
-    fulltime_mt = [mt for mt in mt_list if mt.get("type") == "fulltime"]
+    # แต่ละกะ: title_requirements — ฉายาขั้นต่ำต่อกะต่อวัน (soft constraint)
+    # เช่น [{"title": "เต็มเวลา", "min": 1}] → ต้องมีคนฉายา "เต็มเวลา" >= 1 ต่อวัน
+    # group staff by title for quick lookup
+    mt_by_title = {}
+    for mt in mt_list:
+        t = str(mt.get("title") or "").strip()
+        if t:
+            mt_by_title.setdefault(t, []).append(mt)
     min_ft_penalty_terms = []
-    if fulltime_mt:
-        for shift in shift_list:
-            sn = shift["name"]
-            min_ft = max(0, int(shift.get("min_fulltime", 0)))
-            if min_ft <= 0:
+    for shift in shift_list:
+        sn = shift["name"]
+        title_reqs = shift.get("title_requirements") or []
+        if not title_reqs:
+            continue
+        slots = slots_by_shift.get(sn, [])
+        if not slots:
+            continue
+        for req in title_reqs:
+            req_title = str(req.get("title") or "").strip()
+            req_min = max(0, int(req.get("min") or 0))
+            if not req_title or req_min <= 0:
                 continue
-            slots = slots_by_shift.get(sn, [])
-            if not slots:
+            matching_mt = mt_by_title.get(req_title, [])
+            if not matching_mt:
                 continue
+            safe_title = req_title.replace(" ", "_")[:20]
             for day in range(num_days):
                 if not any(_is_slot_active_on_day(s, p, day, start_date, holiday_set) for s, p, _, _ in slots):
                     continue
-                ft_count = sum(
+                title_count = sum(
                     assign[(mt["name"], day, sn, pos_name, slot_i)]
-                    for mt in fulltime_mt
+                    for mt in matching_mt
                     for _, _, pos_name, slot_i in slots
                 )
-                shortfall = model.new_int_var(0, min_ft, f"ft_short_{sn}_d{day}")
-                model.add(shortfall >= min_ft - ft_count)
+                shortfall = model.new_int_var(0, req_min, f"treq_{safe_title}_{sn}_d{day}")
+                model.add(shortfall >= req_min - title_count)
                 min_ft_penalty_terms.append(shortfall)
 
     for shift in shift_list:

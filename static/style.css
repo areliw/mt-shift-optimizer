@@ -626,13 +626,6 @@ textarea:focus {
 
 .cell-dummy:hover { background: #fca5a5; }
 
-/* ===== Multi-shift highlight ===== */
-.cell-multi-shift {
-  background: #fef3c7;
-  border-radius: 3px;
-  padding: 1px 3px;
-}
-
 /* ===== Editable filled slots ===== */
 .cell-name {
   cursor: pointer;
@@ -691,6 +684,8 @@ span.slot-divider {
 
 .td-has-dummy { background: #fff5f5; }
 .td-inactive { color: #ccc; text-align: center; font-size: .85em; }
+.tr-holiday td { background: #dcfce7; }
+.tr-holiday td:first-child { background: #bbf7d0; font-weight: 700; }
 
 .dummy-warn-banner {
   background: var(--warn-light);

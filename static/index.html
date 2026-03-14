@@ -308,6 +308,11 @@
               <li><strong>ผลลัพธ์:</strong> ตอนสร้างตาราง ระบบจะเปิดกะตามวันที่ที่เลือก (รวมวันหยุดถ้าเปิดสวิตช์) และเรียงคอลัมน์ตามลำดับช่องที่ตั้งไว้</li>
             </ul>
           </details>
+          <details class="shift-title-reqs-details">
+            <summary>ฉายาขั้นต่ำต่อกะ <small>(เช่น ต้องมี "เต็มเวลา" >= 1 คน)</small></summary>
+            <div id="shift_title_requirements"></div>
+            <button type="button" id="add_title_req_row" class="small">+ เพิ่มเงื่อนไขฉายา</button>
+          </details>
           <div class="positions-editor">
             <span>ช่องในกะ</span>
             <div id="shift_positions_list"></div>
@@ -331,6 +336,7 @@
         <div id="schedule_table_wrap"></div>
         <p>
           <a id="export_csv" href="#" class="btn-secondary" style="display:none">↓ ดาวน์โหลด CSV</a>
+          <button id="print_schedule" class="btn-secondary" style="display:none">🖨 พิมพ์ตาราง A4</button>
         </p>
       </section>
     </div>

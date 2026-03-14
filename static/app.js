@@ -1344,6 +1344,59 @@ function hasShiftFormUnsavedChanges() {
   return false;
 }
 
+// --- Title Requirements per Shift ---
+function renderTitleRequirements(reqs) {
+  const wrap = document.getElementById("shift_title_requirements");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  const titles = (window.titlesCatalog || []).map(t => typeof t === "string" ? t : t.name);
+  (reqs || []).forEach((req) => {
+    const row = document.createElement("div");
+    row.className = "title-req-row";
+    row.style.display = "flex";
+    row.style.gap = "6px";
+    row.style.alignItems = "center";
+    row.style.marginBottom = "4px";
+    const sel = document.createElement("select");
+    sel.className = "title-req-title";
+    sel.innerHTML = '<option value="">-- เลือกฉายา --</option>' + titles.map(t => `<option value="${escapeHtml(t)}"${t === req.title ? " selected" : ""}>${escapeHtml(t)}</option>`).join("");
+    const lbl = document.createElement("span");
+    lbl.textContent = " >= ";
+    const inp = document.createElement("input");
+    inp.type = "number";
+    inp.className = "title-req-min";
+    inp.min = "0";
+    inp.max = "99";
+    inp.value = req.min || 0;
+    inp.style.width = "50px";
+    const unit = document.createElement("span");
+    unit.textContent = " คน";
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "small danger";
+    del.textContent = "ลบ";
+    del.addEventListener("click", () => { row.remove(); });
+    row.append(sel, lbl, inp, unit, del);
+    wrap.appendChild(row);
+  });
+}
+
+function collectTitleRequirements() {
+  const wrap = document.getElementById("shift_title_requirements");
+  if (!wrap) return [];
+  return Array.from(wrap.querySelectorAll(".title-req-row")).map(row => {
+    const title = (row.querySelector(".title-req-title") || {}).value || "";
+    const min = parseInt((row.querySelector(".title-req-min") || {}).value, 10) || 0;
+    return { title: title.trim(), min };
+  }).filter(r => r.title && r.min > 0);
+}
+
+document.getElementById("add_title_req_row").addEventListener("click", () => {
+  const current = collectTitleRequirements();
+  current.push({ title: "", min: 1 });
+  renderTitleRequirements(current);
+});
+
 function resetShiftForm() {
   currentShiftId = null;
   const nameInput = document.getElementById("shift_name");
@@ -1351,6 +1404,7 @@ function resetShiftForm() {
   setShiftActiveDaysOfMonth([]);
   const ihEl = document.getElementById("shift_include_holidays");
   if (ihEl) ihEl.checked = false;
+  renderTitleRequirements([]);
   const list = document.getElementById("shift_positions_list");
   if (list) {
     list.innerHTML = "";
@@ -1376,6 +1430,7 @@ function startEditShift(shiftId) {
   setShiftActiveDaysOfMonth(shift.active_days_of_month || []);
   const ihEl = document.getElementById("shift_include_holidays");
   if (ihEl) ihEl.checked = !!shift.include_holidays;
+  renderTitleRequirements(shift.title_requirements || []);
   const list = document.getElementById("shift_positions_list");
   if (list) {
     list.innerHTML = "";
@@ -1421,6 +1476,7 @@ function renderSchedule(data, staffList) {
   const meta = document.getElementById("schedule_meta");
   const wrap = document.getElementById("schedule_table_wrap");
   const exportLink = document.getElementById("export_csv");
+  const printBtn = document.getElementById("print_schedule");
   // Clear dummy warning banner ถ้ามี
   const oldWarn = document.getElementById("dummy_warn_banner");
   if (oldWarn) oldWarn.remove();
@@ -1429,6 +1485,7 @@ function renderSchedule(data, staffList) {
     meta.textContent = "ยังไม่มีตาราง — กด \"สร้างตารางเวร\" เพื่อสร้าง";
     wrap.innerHTML = "";
     exportLink.style.display = "none";
+    if (printBtn) printBtn.style.display = "none";
     return;
   }
   const runId = data.run_id;
@@ -1443,6 +1500,7 @@ function renderSchedule(data, staffList) {
   meta.textContent = `Run #${runId} — สร้างเมื่อ ${data.created_at} (${displayDays} วัน)${dateRange ? " · " + dateRange : ""}${metaSuffix}`;
   exportLink.href = API + "/schedule/export/csv?run_id=" + runId;
   exportLink.style.display = "inline";
+  if (printBtn) printBtn.style.display = "inline";
 
   // Banner แจ้งเตือนถ้ามี dummy slots
   if (dummyCount > 0) {
@@ -1519,13 +1577,6 @@ function renderSchedule(data, staffList) {
   const shiftNames = shiftsMeta.map((m) => m.name);
   const hasRooms = shiftsMeta.some((m) => m.room);
 
-  // นับจำนวนเวร/วัน ของแต่ละคน สำหรับ highlight multi-shift
-  const staffDayCount = {};
-  data.slots.filter(s => !s.is_dummy).forEach(s => {
-    const key = `${s.staff_name}-${s.day}`;
-    staffDayCount[key] = (staffDayCount[key] || 0) + 1;
-  });
-
   // Header rows:
   // 1) Room group (optional)
   // 2) Shift name
@@ -1586,7 +1637,14 @@ function renderSchedule(data, staffList) {
 
   days.forEach((day) => {
     const dayLabel = formatDayLabel(day, startDate);
-    html += `<tr><td>${escapeHtml(dayLabel)}</td>`;
+    let isHoliday = false;
+    if (startDate) {
+      const [sy, sm, sd] = startDate.split("-").map(Number);
+      const dt = new Date(sy, sm - 1, sd + day);
+      const iso = dt.getFullYear() + "-" + String(dt.getMonth()+1).padStart(2,"0") + "-" + String(dt.getDate()).padStart(2,"0");
+      isHoliday = holidaySet.has(iso);
+    }
+    html += `<tr class="${isHoliday ? "tr-holiday" : ""}"><td>${escapeHtml(dayLabel)}</td>`;
     let prevRoom = null;
     shiftNames.forEach((sn) => {
       const meta = shiftsMeta.find((m) => m.name === sn) || {};
@@ -1608,10 +1666,7 @@ function renderSchedule(data, staffList) {
           } else if (s.is_dummy) {
             html += `<td class="td-has-dummy${roomSep}"><span class="cell-dummy" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" title="คลิกเพื่อมอบหมาย">ว่าง</span></td>`;
           } else {
-            const isMulti = staffDayCount[`${s.staff_name}-${day}`] > 1;
-            const multiCls = isMulti ? " cell-multi-shift" : "";
-            const multiTitle = isMulti ? ` ⚠ อยู่ ${staffDayCount[`${s.staff_name}-${day}`]} เวรวันนี้` : "";
-            const nameSpan = `<span class="cell-name${multiCls}" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" data-name="${escapeHtml(s.staff_name)}" title="คลิกเพื่อเปลี่ยน${multiTitle}">${escapeHtml(s.staff_name)}${isMulti ? " ⚡" : ""}</span>`;
+            const nameSpan = `<span class="cell-name" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" data-name="${escapeHtml(s.staff_name)}" title="คลิกเพื่อเปลี่ยน">${escapeHtml(s.staff_name)}</span>`;
             const content = nameSpan;
             html += `<td${roomSep ? ` class="${roomSep.trim()}"` : ""}>${content}</td>`;
           }
@@ -2973,7 +3028,7 @@ document.getElementById("add_shift").addEventListener("click", async () => {
     const r = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, positions, active_days, active_days_of_month, include_holidays }),
+      body: JSON.stringify({ name, positions, active_days, active_days_of_month, include_holidays, title_requirements: collectTitleRequirements() }),
     });
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
@@ -3418,6 +3473,84 @@ document.getElementById("import_json_file").addEventListener("change", async (e)
     alert("Import ไม่สำเร็จ: " + err.message);
   }
   e.target.value = "";
+});
+
+// --- Print Schedule A4 ---
+document.getElementById("print_schedule").addEventListener("click", () => {
+  const wrap = document.getElementById("schedule_table_wrap");
+  const table = wrap ? wrap.querySelector("table") : null;
+  if (!table) { alert("ยังไม่มีตาราง"); return; }
+  const metaEl = document.getElementById("schedule_meta");
+  const title = metaEl ? metaEl.textContent : "ตารางเวร";
+
+  const printWin = window.open("", "_blank");
+  const safeTitle = title.replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  printWin.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>${safeTitle}</title>
+<style>
+@page { size: A4 landscape; margin: 8mm; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: "Sarabun", "Noto Sans Thai", sans-serif; font-size: 7.5pt; }
+h2 { font-size: 11pt; text-align: center; margin-bottom: 4px; }
+table.schedule { width: 100%; border-collapse: collapse; table-layout: fixed; }
+table.schedule th, table.schedule td {
+  border: 1px solid #555; padding: 1px 2px; text-align: center;
+  font-size: 7pt; word-break: keep-all; overflow: hidden;
+  white-space: nowrap; text-overflow: ellipsis;
+}
+table.schedule th { background: #e2e8f0; font-weight: 600; }
+.th-room { background: #cbd5e1; font-size: 8pt; }
+.th-day, table.schedule td:first-child { background: #f1f5f9; font-weight: 600; white-space: nowrap; width: 50px; min-width: 50px; }
+.td-has-dummy { background: #fee2e2; color: #b91c1c; font-weight: 700; }
+.td-inactive { color: #aaa; }
+.tr-holiday td { background: #dcfce7; }
+.tr-holiday td:first-child { background: #bbf7d0; font-weight: 700; }
+table.schedule tr:nth-child(even) td { background: #f8fafc; }
+table.schedule tr:nth-child(even) td:first-child { background: #f1f5f9; }
+.page-break { page-break-before: always; }
+h3 { font-size: 10pt; text-align: center; margin: 6px 0 4px; }
+table.summary { border-collapse: collapse; table-layout: auto; margin: 0 auto; }
+table.summary th, table.summary td {
+  border: 1px solid #888; padding: 2px 6px; text-align: center;
+  font-size: 8pt; white-space: nowrap;
+}
+table.summary th { background: #e2e8f0; font-weight: 600; }
+table.summary tr:nth-child(even) td { background: #f8fafc; }
+.stats-line { text-align: center; margin-bottom: 4px; font-size: 8pt; }
+@media print {
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+</style></head><body>
+<h2>${safeTitle}</h2>
+`);
+
+  // Clone schedule table — strip interactive attrs
+  const clone = table.cloneNode(true);
+  clone.classList.add("schedule");
+  clone.querySelectorAll("[data-run],[data-day],[data-shift],[data-pos],[data-slot],[data-name]").forEach(el => {
+    ["data-run","data-day","data-shift","data-pos","data-slot","data-name"].forEach(a => el.removeAttribute(a));
+    el.style.cursor = "default";
+  });
+  printWin.document.write(clone.outerHTML);
+
+  // Summary on a new page
+  const summary = document.getElementById("schedule_summary");
+  if (summary) {
+    printWin.document.write('<div class="page-break"></div>');
+    printWin.document.write('<h3>' + safeTitle + ' - สรุปเวรต่อคน</h3>');
+    // Rebuild summary as a proper table
+    const summaryClone = summary.cloneNode(true);
+    summaryClone.querySelectorAll("table").forEach(t => {
+      t.classList.add("summary");
+      t.style.tableLayout = "auto";
+      t.style.width = "auto";
+    });
+    printWin.document.write(summaryClone.innerHTML);
+  }
+
+  printWin.document.write('</body></html>');
+  printWin.document.close();
+  setTimeout(() => { printWin.focus(); printWin.print(); }, 400);
 });
 
 // --- Staff Pairs ---

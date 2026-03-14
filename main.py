@@ -394,6 +394,7 @@ class ShiftCreate(BaseModel):
     active_days: str | None = None
     active_days_of_month: list[int] = []
     include_holidays: bool = False
+    title_requirements: list[dict] = []
 
     @field_validator("name")
     @classmethod
@@ -414,6 +415,7 @@ class ShiftUpdate(BaseModel):
     active_days: str | None = None
     active_days_of_month: list[int] = []
     include_holidays: bool = False
+    title_requirements: list[dict] = []
 
     @field_validator("name")
     @classmethod
@@ -695,7 +697,7 @@ def api_create_shift(body: ShiftCreate):
     if body.positions is not None:
         positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0)), "active_weekdays": (p.active_weekdays or "").strip() or None, "holiday_mode": (p.holiday_mode or "all").strip() or "all"} for p in body.positions]
     try:
-        sid = create_shift(body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, active_days_of_month=body.active_days_of_month, include_holidays=body.include_holidays)
+        sid = create_shift(body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, active_days_of_month=body.active_days_of_month, include_holidays=body.include_holidays, title_requirements=body.title_requirements)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="ชื่อกะซ้ำ มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
     out = {"id": sid, "name": body.name}
@@ -742,7 +744,7 @@ def api_update_shift(shift_id: int, body: ShiftUpdate):
     if body.positions is not None:
         positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0)), "active_weekdays": (p.active_weekdays or "").strip() or None, "holiday_mode": (p.holiday_mode or "all").strip() or "all"} for p in body.positions]
     try:
-        update_shift(shift_id, body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, active_days_of_month=body.active_days_of_month, include_holidays=body.include_holidays)
+        update_shift(shift_id, body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, active_days_of_month=body.active_days_of_month, include_holidays=body.include_holidays, title_requirements=body.title_requirements)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="ชื่อกะซ้ำ มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
     out = {"id": shift_id, "name": body.name}

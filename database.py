@@ -401,6 +401,7 @@ def init_db(conn=None):
         _migrate_shift_position_min_fulltime(conn)
         _migrate_shift_min_fulltime(conn)
         _migrate_shift_sort_order(conn)
+        _migrate_shift_title_requirements(conn)
     finally:
         if close:
             conn.close()
@@ -676,6 +677,26 @@ def _migrate_shift_min_fulltime(conn):
         if any(c[1] == "min_fulltime" for c in info):
             return
         conn.execute("ALTER TABLE shift ADD COLUMN min_fulltime INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def _migrate_shift_title_requirements(conn):
+    """กำหนดจำนวนฉายาขั้นต่ำต่อกะ เช่น [{"title":"เต็มเวลา","min":1}]"""
+    try:
+        info = conn.execute("PRAGMA table_info(shift)").fetchall()
+        if any(c[1] == "title_requirements" for c in info):
+            return
+        conn.execute("ALTER TABLE shift ADD COLUMN title_requirements TEXT")
+        # migrate existing min_fulltime into title_requirements
+        if any(c[1] == "min_fulltime" for c in info):
+            rows = conn.execute("SELECT id, min_fulltime FROM shift WHERE min_fulltime > 0").fetchall()
+            for sid, mf in rows:
+                conn.execute(
+                    "UPDATE shift SET title_requirements = ? WHERE id = ?",
+                    (json.dumps([{"title": "เต็มเวลา", "min": mf}], ensure_ascii=False), sid),
+                )
         conn.commit()
     except sqlite3.OperationalError:
         pass
@@ -1465,7 +1486,7 @@ def list_shifts(conn=None):
     conn = conn or get_connection()
     try:
         rows = conn.execute(
-            "SELECT id, name, donor, xmatch, active_days, COALESCE(include_holidays,0), COALESCE(sort_order, 0), active_days_of_month "
+            "SELECT id, name, donor, xmatch, active_days, COALESCE(include_holidays,0), COALESCE(sort_order, 0), active_days_of_month, COALESCE(title_requirements, '') "
             "FROM shift ORDER BY COALESCE(sort_order, 0), id"
         ).fetchall()
         result = []
@@ -1475,6 +1496,10 @@ def list_shifts(conn=None):
             include_holidays = bool(r[5]) if len(r) > 5 else False
             sort_order = int(r[6] or 0) if len(r) > 6 else 0
             active_days_of_month = _parse_int_csv(r[7] if len(r) > 7 else None, 1, 31)
+            try:
+                title_requirements = json.loads(r[8]) if len(r) > 8 and r[8] else []
+            except Exception:
+                title_requirements = []
             pos_rows = conn.execute(
                 """
                 SELECT
@@ -1528,7 +1553,7 @@ def list_shifts(conn=None):
                             "holiday_mode": holiday_mode_p,
                         }
                     )
-                result.append({"id": sid, "name": name, "positions": positions, "active_days": active_days, "active_days_of_month": active_days_of_month, "include_holidays": include_holidays, "sort_order": sort_order})
+                result.append({"id": sid, "name": name, "positions": positions, "active_days": active_days, "active_days_of_month": active_days_of_month, "include_holidays": include_holidays, "sort_order": sort_order, "title_requirements": title_requirements})
             else:
                 result.append({
                     "id": sid,
@@ -1541,6 +1566,7 @@ def list_shifts(conn=None):
                     "active_days_of_month": active_days_of_month,
                     "include_holidays": include_holidays,
                     "sort_order": sort_order,
+                    "title_requirements": title_requirements,
                 })
         return result
     finally:
@@ -1569,15 +1595,16 @@ def _insert_position(conn, shift_id, index, p):
     )
 
 
-def create_shift(name, donor=1, xmatch=1, positions=None, active_days=None, active_days_of_month=None, include_holidays=False, conn=None):
+def create_shift(name, donor=1, xmatch=1, positions=None, active_days=None, active_days_of_month=None, include_holidays=False, title_requirements=None, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
         next_order_row = conn.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM shift").fetchone()
         next_order = int(next_order_row[0] or 0) if next_order_row else 0
+        tr_json = json.dumps(title_requirements, ensure_ascii=False) if title_requirements else None
         cur = conn.execute(
-            "INSERT INTO shift (name, donor, xmatch, active_days, include_holidays, sort_order, active_days_of_month) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (name, donor, xmatch, _serialize_int_csv(active_days, 0, 6), 1 if include_holidays else 0, next_order, _serialize_int_csv(active_days_of_month, 1, 31)),
+            "INSERT INTO shift (name, donor, xmatch, active_days, include_holidays, sort_order, active_days_of_month, title_requirements) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (name, donor, xmatch, _serialize_int_csv(active_days, 0, 6), 1 if include_holidays else 0, next_order, _serialize_int_csv(active_days_of_month, 1, 31), tr_json),
         )
         sid = cur.lastrowid
         if positions:
@@ -1590,11 +1617,12 @@ def create_shift(name, donor=1, xmatch=1, positions=None, active_days=None, acti
             conn.close()
 
 
-def update_shift(sid, name, donor=1, xmatch=1, positions=None, active_days=None, active_days_of_month=None, include_holidays=False, conn=None):
+def update_shift(sid, name, donor=1, xmatch=1, positions=None, active_days=None, active_days_of_month=None, include_holidays=False, title_requirements=None, conn=None):
     close = conn is None
     conn = conn or get_connection()
     try:
-        conn.execute("UPDATE shift SET name = ?, donor = ?, xmatch = ?, active_days = ?, include_holidays = ?, active_days_of_month = ? WHERE id = ?", (name, donor, xmatch, _serialize_int_csv(active_days, 0, 6), 1 if include_holidays else 0, _serialize_int_csv(active_days_of_month, 1, 31), sid))
+        tr_json = json.dumps(title_requirements, ensure_ascii=False) if title_requirements else None
+        conn.execute("UPDATE shift SET name = ?, donor = ?, xmatch = ?, active_days = ?, include_holidays = ?, active_days_of_month = ?, title_requirements = ? WHERE id = ?", (name, donor, xmatch, _serialize_int_csv(active_days, 0, 6), 1 if include_holidays else 0, _serialize_int_csv(active_days_of_month, 1, 31), tr_json, sid))
         conn.execute("DELETE FROM shift_position WHERE shift_id = ?", (sid,))
         if positions:
             for i, p in enumerate(positions):
@@ -1835,7 +1863,7 @@ def get_shift_list(conn=None):
     conn = conn or get_connection()
     try:
         rows = conn.execute(
-            "SELECT id, name, donor, xmatch, active_days, COALESCE(include_holidays,0), active_days_of_month "
+            "SELECT id, name, donor, xmatch, active_days, COALESCE(include_holidays,0), active_days_of_month, COALESCE(title_requirements,'') "
             "FROM shift ORDER BY COALESCE(sort_order, 0), id"
         ).fetchall()
         result = []
@@ -1844,6 +1872,10 @@ def get_shift_list(conn=None):
             active_days = r[4] if len(r) > 4 else None
             include_holidays = bool(r[5]) if len(r) > 5 else False
             active_days_of_month = _parse_int_csv(r[6] if len(r) > 6 else None, 1, 31)
+            try:
+                title_reqs = json.loads(r[7]) if len(r) > 7 and r[7] else []
+            except Exception:
+                title_reqs = []
             pos_rows = conn.execute(
                 "SELECT name, regular_only, COALESCE(slot_count, 1), time_window_name, COALESCE(required_skill,''), COALESCE(min_skill_level,0), COALESCE(allowed_titles,'[]'), COALESCE(max_per_week,0), active_weekdays, COALESCE(holiday_mode,'all') FROM shift_position WHERE shift_id = ? ORDER BY sort_order",
                 (sid,),
@@ -1854,6 +1886,7 @@ def get_shift_list(conn=None):
                     "active_days": active_days,
                     "active_days_of_month": active_days_of_month,
                     "include_holidays": include_holidays,
+                    "title_requirements": title_reqs,
                     "positions": [{"name": p[0], "regular_only": bool(p[1]), "slot_count": int(p[2]), "time_window_name": (p[3] if len(p) > 3 and p[3] else None) or "", "required_skill": p[4] or "", "min_skill_level": int(p[5] or 0), "allowed_titles": json.loads(p[6] or "[]"), "max_per_week": int(p[7] or 0), "active_weekdays": (p[8] if len(p) > 8 and p[8] else None) or None, "holiday_mode": (p[9] if len(p) > 9 and p[9] else None) or "all"} for p in pos_rows],
                 })
             else:
@@ -1862,6 +1895,7 @@ def get_shift_list(conn=None):
                     "active_days": active_days,
                     "active_days_of_month": active_days_of_month,
                     "include_holidays": include_holidays,
+                    "title_requirements": title_reqs,
                     "donor": donor,
                     "xmatch": xmatch,
                     "positions": [{"name": "Donor", "regular_only": False}] * donor + [{"name": "Xmatch", "regular_only": False}] * xmatch,
@@ -2223,6 +2257,28 @@ def _validate_manual_assignment(conn, run_id, day, shift_name, position, slot_in
             off_month_days = {int(r[0]) for r in conn.execute("SELECT day FROM staff_off_day_of_month WHERE staff_id = ?", (staff_id,)).fetchall()}
             if weekday in off_weekdays or day_of_month in off_month_days:
                 raise ValueError(f"'{staff_name}' เป็นวัน off ในวันที่นี้ — ลงไม่ได้")
+        except ValueError:
+            raise
+        except Exception:
+            pass
+
+    # ข้อยกเว้นรายวันแยกกะ (shift_day_rules)
+    if start_date_str:
+        try:
+            schedule_date_for_rule = datetime.strptime(start_date_str.strip()[:10], "%Y-%m-%d") + timedelta(days=int(day))
+            dom = schedule_date_for_rule.day
+            sdr_raw = conn.execute("SELECT COALESCE(shift_day_rules, '') FROM staff WHERE id = ?", (staff_id,)).fetchone()
+            sdr_json = sdr_raw[0] if sdr_raw and sdr_raw[0] else ""
+            if sdr_json:
+                sdr_list = json.loads(sdr_json) if isinstance(sdr_json, str) else sdr_json
+                sdr_list = _normalize_shift_day_rules(sdr_list)
+                for rule in sdr_list:
+                    if int(rule.get("day", 0)) == dom:
+                        allowed = [str(s).strip() for s in rule.get("allowed_shifts", []) if s]
+                        if allowed and shift_name not in allowed:
+                            raise ValueError(
+                                f"'{staff_name}' วันที่ {dom} ลงได้แค่กะ {', '.join(allowed)} — ลง '{shift_name}' ไม่ได้"
+                            )
         except ValueError:
             raise
         except Exception:
