@@ -135,18 +135,54 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 _RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))   # seconds
 _RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "120"))         # requests / window
-_rate_counters: dict[str, list[float]] = collections.defaultdict(list)
+_RATE_TRACKED_IP_MAX = int(os.environ.get("RATE_TRACKED_IP_MAX", "10000"))
+_RATE_COUNTER_GC_INTERVAL = int(os.environ.get("RATE_COUNTER_GC_INTERVAL", "30"))
+_rate_counters: dict[str, collections.deque[float]] = {}
+_rate_last_seen: dict[str, float] = {}
+_rate_last_gc_at = 0.0
+
+
+def _rate_limit_gc(now: float, window_start: float):
+    """Prune stale per-IP buckets and cap total tracked IPs."""
+    stale_ips = []
+    for ip, dq in list(_rate_counters.items()):
+        while dq and dq[0] < window_start:
+            dq.popleft()
+        last_seen = _rate_last_seen.get(ip, 0.0)
+        if not dq and last_seen < window_start:
+            stale_ips.append(ip)
+
+    for ip in stale_ips:
+        _rate_counters.pop(ip, None)
+        _rate_last_seen.pop(ip, None)
+
+    if len(_rate_counters) > _RATE_TRACKED_IP_MAX:
+        # Evict least-recently-seen IPs first to keep memory bounded.
+        overflow = len(_rate_counters) - _RATE_TRACKED_IP_MAX
+        for ip, _ in sorted(_rate_last_seen.items(), key=lambda kv: kv[1])[:overflow]:
+            _rate_counters.pop(ip, None)
+            _rate_last_seen.pop(ip, None)
 
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
+    global _rate_last_gc_at
     client_ip = (request.client.host if request.client else "unknown")
     now = time.monotonic()
     window_start = now - _RATE_LIMIT_WINDOW
-    timestamps = _rate_counters[client_ip]
-    # evict stale entries
+    if now - _rate_last_gc_at >= _RATE_COUNTER_GC_INTERVAL:
+        _rate_limit_gc(now, window_start)
+        _rate_last_gc_at = now
+
+    timestamps = _rate_counters.get(client_ip)
+    if timestamps is None:
+        timestamps = collections.deque(maxlen=max(_RATE_LIMIT_MAX + 1, 2))
+        _rate_counters[client_ip] = timestamps
+
     while timestamps and timestamps[0] < window_start:
-        timestamps.pop(0)
+        timestamps.popleft()
+
+    _rate_last_seen[client_ip] = now
     if len(timestamps) >= _RATE_LIMIT_MAX:
         logger.warning("Rate limit exceeded for %s", client_ip)
         return JSONResponse(

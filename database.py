@@ -244,6 +244,12 @@ def get_connection():
     return sqlite3.connect(str(DB_PATH))
 
 
+def get_active_db_key() -> str:
+    """Return current DB identity for cache keying (workspace-aware)."""
+    ws_path = _workspace_db_path.get()
+    return ws_path if ws_path is not None else str(DB_PATH)
+
+
 def init_db(conn=None):
     """สร้างตารางถ้ายังไม่มี"""
     close = conn is None

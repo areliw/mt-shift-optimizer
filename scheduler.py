@@ -1,10 +1,51 @@
 # scheduler.py
 
+import os
+import time
 from datetime import datetime, timedelta, date as date_type
 from ortools.sat.python import cp_model
-from database import get_mt_list, get_shift_list, get_num_days, get_time_window_catalog_dict, get_holiday_dates, list_staff_pairs
+from database import (
+    get_mt_list,
+    get_shift_list,
+    get_num_days,
+    get_time_window_catalog_dict,
+    get_holiday_dates,
+    list_staff_pairs,
+    get_active_db_key,
+)
 
 DUMMY_WORKER = "_DUMMY_"  # ชื่อพิเศษสำหรับ slot ที่จัดไม่ได้ด้วย staff จริง
+_CATALOG_CACHE_TTL_SECONDS = int(os.environ.get("CATALOG_CACHE_TTL_SECONDS", "20"))
+_CATALOG_CACHE_MAX_KEYS = int(os.environ.get("CATALOG_CACHE_MAX_KEYS", "64"))
+_SLOT_EXPANSION_LIMIT = int(os.environ.get("SLOT_EXPANSION_LIMIT", "20000"))
+_catalog_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _get_cached_catalog():
+    key = get_active_db_key()
+    now = time.monotonic()
+    cached = _catalog_cache.get(key)
+    if cached and (now - cached[0]) <= _CATALOG_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    catalog = get_time_window_catalog_dict()
+    _catalog_cache[key] = (now, catalog)
+    if len(_catalog_cache) > _CATALOG_CACHE_MAX_KEYS:
+        # Keep most-recently-refreshed cache entries only.
+        for old_key, _ in sorted(_catalog_cache.items(), key=lambda kv: kv[1][0])[: len(_catalog_cache) - _CATALOG_CACHE_MAX_KEYS]:
+            _catalog_cache.pop(old_key, None)
+    return catalog
+
+
+def _build_expanded_with_guard(shift_list):
+    expanded = []
+    for idx, item in enumerate(_expand_positions(shift_list), start=1):
+        if idx > _SLOT_EXPANSION_LIMIT:
+            raise ValueError(
+                f"จำนวน slot ที่ต้องขยาย ({idx}) เกินเพดาน {_SLOT_EXPANSION_LIMIT} — ลดจำนวนกะ/ตำแหน่ง/slot_count หรือเพิ่ม SLOT_EXPANSION_LIMIT"
+            )
+        expanded.append(item)
+    return tuple(expanded)
 
 
 def _window_contains(catalog, staff_window_name, position_window_name):
@@ -168,8 +209,14 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
     if not mt_list or not shift_list or num_days <= 0:
         return ["ไม่มีบุคลากรหรือกะ หรือจำนวนวันเป็น 0"]
 
-    expanded = list(_expand_positions(shift_list))
-    catalog = get_time_window_catalog_dict()
+    try:
+        expanded = _build_expanded_with_guard(shift_list)
+    except ValueError as e:
+        return [str(e)]
+    catalog = _get_cached_catalog()
+    slots_by_shift = {}
+    for item in expanded:
+        slots_by_shift.setdefault(item[0]["name"], []).append(item)
     start_date = None
     if start_date_str:
         try:
@@ -287,7 +334,7 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
                     smax = 0
                 if smin is None and smax is None:
                     continue
-                slots = [item for item in expanded if item[0]["name"] == str(shift_name)]
+                slots = slots_by_shift.get(str(shift_name), [])
                 if not slots:
                     reasons.append(f"'{mt['name']}' ตั้งเงื่อนไขกะ '{shift_name}' แต่ไม่พบกะนี้ในระบบ")
                     continue
@@ -394,7 +441,7 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
     shift_list = get_shift_list()
     if num_days is None:
         num_days = get_num_days()
-    catalog = get_time_window_catalog_dict()
+    catalog = _get_cached_catalog()
     model = cp_model.CpModel()
 
     start_date = None
@@ -419,7 +466,10 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
     all_mt = mt_list + [dummy]
 
     assign = {}
-    expanded = list(_expand_positions(shift_list))
+    expanded = _build_expanded_with_guard(shift_list)
+    slots_by_shift = {}
+    for item in expanded:
+        slots_by_shift.setdefault(item[0]["name"], []).append(item)
     for mt in all_mt:
         for day in range(num_days):
             for shift, pos, pos_name, slot_i in expanded:
@@ -518,15 +568,12 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
     # แต่ละกะ: min_fulltime = เจ้าหน้าที่ประจำขั้นต่ำ (รวมทุกช่องในกะ) 0 = ยืดหยุ่น/pt ได้
     fulltime_mt = [mt for mt in mt_list if mt.get("type") == "fulltime"]
     if fulltime_mt:
-        shift_slots = {}  # shift_name -> [(shift, pos, pos_name, slot_i), ...]
-        for shift, pos, pos_name, slot_i in expanded:
-            shift_slots.setdefault(shift["name"], []).append((shift, pos, pos_name, slot_i))
         for shift in shift_list:
             sn = shift["name"]
             min_ft = max(0, int(shift.get("min_fulltime", 0)))
             if min_ft <= 0:
                 continue
-            slots = shift_slots.get(sn, [])
+            slots = slots_by_shift.get(sn, [])
             if not slots:
                 continue
             for day in range(num_days):
@@ -696,8 +743,9 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
                         sn = shift["name"]
                         if not _shift_applies(sn):
                             continue
-                        n1_in_shift = [assign[(n1, day, sn, pn, si)] for s, _, pn, si in expanded if s["name"] == sn]
-                        n2_in_shift = [assign[(n2, day, sn, pn, si)] for s, _, pn, si in expanded if s["name"] == sn]
+                        sn_slots = slots_by_shift.get(sn, [])
+                        n1_in_shift = [assign[(n1, day, sn, pn, si)] for _, _, pn, si in sn_slots]
+                        n2_in_shift = [assign[(n2, day, sn, pn, si)] for _, _, pn, si in sn_slots]
                         if not n1_in_shift or not n2_in_shift:
                             continue
                         n1_any = model.new_bool_var(f"n1_any_{n1}_{sn}_d{day}")
@@ -724,8 +772,9 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
                     sn = shift["name"]
                     if not _shift_applies(sn):
                         continue
-                    n2_in_shift = [assign[(n2, day, sn, pn, si)] for s, _, pn, si in expanded if s["name"] == sn]
-                    n1_in_shift = [assign[(n1, day, sn, pn, si)] for s, _, pn, si in expanded if s["name"] == sn]
+                    sn_slots = slots_by_shift.get(sn, [])
+                    n2_in_shift = [assign[(n2, day, sn, pn, si)] for _, _, pn, si in sn_slots]
+                    n1_in_shift = [assign[(n1, day, sn, pn, si)] for _, _, pn, si in sn_slots]
                     if not n2_in_shift:
                         continue
                     if not n1_in_shift:
