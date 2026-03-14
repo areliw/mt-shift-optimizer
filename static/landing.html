@@ -24,7 +24,8 @@
     text-align: center;
   }
   h1 { font-size: 1.6rem; color: #1a73e8; margin-bottom: 8px; }
-  .subtitle { color: #666; margin-bottom: 28px; font-size: 0.95rem; }
+  .subtitle { color: #666; margin-bottom: 4px; font-size: 0.95rem; }
+  .subtitle-note { color: #999; margin-bottom: 28px; font-size: 0.85rem; }
   .create-section { margin-bottom: 28px; }
   .create-section input {
     width: 100%;
@@ -94,6 +95,7 @@
 <div class="container">
   <h1>MT Shift Optimizer</h1>
   <p class="subtitle">ระบบจัดเวรอัตโนมัติ สำหรับแผนก MT</p>
+  <p class="subtitle-note">ทุกคนจะเห็น workspace ของคุณ</p>
 
   <div class="create-section">
     <input type="text" id="wsName" placeholder="ชื่อ workspace (เช่น รพ.ของฉัน)" maxlength="100">
@@ -106,6 +108,8 @@
     <p class="empty-msg">กำลังโหลด...</p>
   </div>
 
+  <div id="scheduleRunCount" style="margin-top:20px;font-size:0.88rem;color:#666;"></div>
+
   <div style="margin-top:28px;padding-top:16px;border-top:1px solid #eee;font-size:0.85rem;color:#999;">
     พบปัญหา / แจ้งบัค / ติดต่อ:
     <a href="mailto:areliw11111@gmail.com" style="color:#1a73e8;text-decoration:none;">areliw11111@gmail.com</a>
@@ -117,7 +121,19 @@
 function _getTokens() { try { return JSON.parse(localStorage.getItem('ws_tokens') || '{}'); } catch { return {}; } }
 function _saveTokens(t) { localStorage.setItem('ws_tokens', JSON.stringify(t)); }
 
+async function loadScheduleRunCount() {
+  try {
+    const r = await fetch('/api/stats/schedule-runs');
+    if (!r.ok) return;
+    const d = await r.json();
+    const total = d.total != null ? Number(d.total) : 0;
+    const el = document.getElementById('scheduleRunCount');
+    if (el) el.textContent = 'สร้างตารางเวรไปแล้ว ' + total.toLocaleString('th-TH') + ' ครั้ง (รวมทั้งหมด)';
+  } catch(e) {}
+}
+
 async function loadWorkspaces() {
+  loadScheduleRunCount();
   try {
     const r = await fetch('/api/workspaces');
     if (!r.ok) { document.getElementById('wsList').innerHTML = '<p class="empty-msg">โหลดไม่สำเร็จ ('+r.status+')</p>'; return; }

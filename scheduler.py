@@ -231,7 +231,7 @@ def _is_slot_active_on_day(shift, pos, day_index, start_date, holiday_set=None):
 def _expand_positions(shift_list):
     """Yield (shift, pos, pos_name, slot_index) for every slot (position × slot_count)."""
     for shift in shift_list:
-        for pos in shift["positions"]:
+        for pos in shift.get("positions", []):
             pos_name = pos["name"] if isinstance(pos, dict) else pos
             slot_count = max(1, int(pos.get("slot_count", 1)) if isinstance(pos, dict) else 1)
             for slot_i in range(slot_count):
@@ -527,6 +527,10 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
 
     assign = {}
     expanded = _build_expanded_with_guard(shift_list)
+    if not expanded:
+        raise ValueError(
+            "ไม่มีช่องเวรให้จัด — กรุณาตั้งตำแหน่ง (shift_position) อย่างน้อย 1 ตำแหน่งต่อกะ หรือตั้ง donor/xmatch สำหรับกะแบบจับคู่"
+        )
     slots_by_shift = {}
     for item in expanded:
         slots_by_shift.setdefault(item[0]["name"], []).append(item)
@@ -649,7 +653,7 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
         if not rules_by_day:
             continue
         for day in range(num_days):
-            day_of_month = (start_date + timedelta(days=day)).day if start_date else (day + 1)
+            day_of_month = (start_date + timedelta(days=day)).day if start_date else ((day % 31) + 1)
             allowed_shifts = rules_by_day.get(day_of_month)
             if not allowed_shifts:
                 continue

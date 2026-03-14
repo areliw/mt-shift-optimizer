@@ -76,6 +76,8 @@ from database import (
     export_all_data,
     import_all_data,
     swap_slots,
+    increment_schedule_run_count,
+    get_schedule_run_count,
 )
 from scheduler import generate_schedule, diagnose_infeasible, DUMMY_WORKER
 from ortools.sat.python import cp_model
@@ -829,7 +831,10 @@ def api_run_schedule(
     start_date_str = get_schedule_start_date()
     logger.info("Running schedule: num_days=%d start_date=%s staff=%d shifts=%d",
                 num_days, start_date_str, len(mt_list), len(shift_list))
-    slots, solver, status = generate_schedule(num_days=num_days, start_date_str=start_date_str or None)
+    try:
+        slots, solver, status = generate_schedule(num_days=num_days, start_date_str=start_date_str or None)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     # กรณี solver fail จริงๆ (MODEL_INVALID ฯลฯ) — ไม่ใช่แค่ infeasible
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -842,6 +847,7 @@ def api_run_schedule(
 
     start_date = get_schedule_start_date()
     run_id = save_schedule(num_days, slots, start_date=start_date)
+    increment_schedule_run_count()
     data = get_schedule(run_id)
 
     # ถ้ามี dummy slots → แจ้งเตือน + วิเคราะห์สาเหตุ
@@ -940,6 +946,7 @@ def api_run_schedule_stream(
                     return
                 start_date = get_schedule_start_date()
                 run_id = save_schedule(num_days, slots, start_date=start_date)
+                increment_schedule_run_count()
                 sched_data = get_schedule(run_id)
                 dummy_slots = [s for s in slots if s.get("is_dummy")]
                 real_slots = [s for s in slots if not s.get("is_dummy")]
@@ -1191,6 +1198,13 @@ def api_delete_workspace(workspace_id: str):
         raise HTTPException(status_code=404, detail="Workspace not found")
     logger.info("Deleted workspace id=%s", workspace_id)
     return {"ok": True}
+
+
+# --- สถิติรวม: จำนวนครั้งที่กดสร้างตารางเวร ---
+@app.get("/api/stats/schedule-runs")
+def api_get_schedule_run_count():
+    """คืนจำนวนครั้งที่กดสร้างตารางเวรรวมทั้งหมด (ทุก workspace)"""
+    return {"total": get_schedule_run_count()}
 
 
 # --- Landing page ---

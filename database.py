@@ -114,7 +114,46 @@ def init_master_db():
                 )
                 conn.commit()
                 shutil.copy2(str(DB_PATH), str(WORKSPACES_DIR / f"{wid}.db"))
+    # สถิติรวม: จำนวนครั้งที่กดสร้างตารางเวร
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS global_stats (
+            key TEXT PRIMARY KEY,
+            value INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    conn.execute(
+        "INSERT OR IGNORE INTO global_stats (key, value) VALUES ('schedule_run_count', 0)"
+    )
+    conn.commit()
     conn.close()
+
+
+def increment_schedule_run_count() -> int:
+    """เพิ่มจำนวนครั้งที่กดสร้างตารางเวร (รวมทุก workspace) คืนค่าล่าสุด"""
+    conn = _get_master_connection()
+    try:
+        conn.execute(
+            "UPDATE global_stats SET value = value + 1 WHERE key = 'schedule_run_count'"
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT value FROM global_stats WHERE key = 'schedule_run_count'"
+        ).fetchone()
+        return int(row[0]) if row else 0
+    finally:
+        conn.close()
+
+
+def get_schedule_run_count() -> int:
+    """คืนจำนวนครั้งที่กดสร้างตารางเวรรวมทั้งหมด"""
+    conn = _get_master_connection()
+    try:
+        row = conn.execute(
+            "SELECT value FROM global_stats WHERE key = 'schedule_run_count'"
+        ).fetchone()
+        return int(row[0]) if row else 0
+    finally:
+        conn.close()
 
 
 def create_workspace(name: str = "") -> tuple[str, str]:
