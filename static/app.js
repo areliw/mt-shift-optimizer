@@ -3276,7 +3276,9 @@ document.getElementById("run_schedule").addEventListener("click", async () => {
 
 async function showPage(pageId) {
   document.querySelectorAll(".app-page").forEach((el) => {
-    el.style.display = el.id === "page-" + pageId ? "" : "none";
+    const show = el.id === "page-" + pageId;
+    el.style.display = show ? "" : "none";
+    if (show) { el.style.animation = "none"; el.offsetHeight; el.style.animation = ""; }
   });
   document.querySelectorAll(".app-nav-item").forEach((a) => {
     a.classList.toggle("active", a.dataset.page === pageId);
@@ -3303,9 +3305,25 @@ async function showPage(pageId) {
 document.querySelectorAll(".app-nav-item").forEach((a) => {
   a.addEventListener("click", async (e) => {
     e.preventDefault();
+    closeMobileSidebar();
     await showPage(a.dataset.page);
   });
 });
+
+/* ===== Mobile sidebar toggle ===== */
+function openMobileSidebar() {
+  document.getElementById("app_sidebar").classList.add("open");
+  document.getElementById("sidebar_overlay").classList.add("active");
+  document.body.style.overflow = "hidden";
+}
+function closeMobileSidebar() {
+  document.getElementById("app_sidebar").classList.remove("open");
+  document.getElementById("sidebar_overlay").classList.remove("active");
+  document.body.style.overflow = "";
+}
+document.getElementById("hamburger_btn").addEventListener("click", openMobileSidebar);
+document.getElementById("sidebar_close").addEventListener("click", closeMobileSidebar);
+document.getElementById("sidebar_overlay").addEventListener("click", closeMobileSidebar);
 
 document.querySelectorAll("input[name='staff_add_month_mode']").forEach((radio) => {
   radio.addEventListener("change", () => {
