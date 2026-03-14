@@ -717,8 +717,8 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
                     )
                     day += 7
 
-    # min/max shifts per month — min = soft (penalty), max = hard
-    MIN_SHIFT_PENALTY = 200_000
+    # min/max shifts per month — min = soft (penalty สูงสุดรองจาก dummy), max = hard
+    MIN_SHIFT_PENALTY = 999_000  # เกือบเท่า DUMMY — กฎโรงพยาบาล ต้องทำให้ได้
     min_shift_penalty_terms = []
     for mt in mt_list:
         total = sum(
@@ -909,60 +909,27 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
                     model.add(has_work[(mt["name"], d)] >= 1).only_enforce_if(consec)
                 consecutive_penalty_terms.append(consec)
 
-    # Balance
-    total_per_mt = []
+    # --- Minimize excess over min: ยื้อให้ทุกคนติด min มากที่สุด ---
+    # คนที่ min=17 ได้ 27 = excess 10 → penalty สูง, solver จะกระจายเวรให้คนอื่นแทน
+    EXCESS_PENALTY = 500  # ต่อเวรที่เกิน min (quadratic: เกิน 1=500, เกิน 2=2000, เกิน 3=4500...)
+    excess_terms = []
     for mt in mt_list:
-        total = sum(
+        mt_total = sum(
             assign[(mt["name"], day, shift["name"], pos_name, slot_i)]
             for day in range(num_days)
             for shift, pos, pos_name, slot_i in expanded
         )
-        total_per_mt.append(total)
-    n_slots = len(expanded) * num_days
-    max_s = model.new_int_var(0, n_slots, "max_s")
-    min_s = model.new_int_var(0, n_slots, "min_s")
-    if total_per_mt:
-        model.add_max_equality(max_s, total_per_mt)
-        model.add_min_equality(min_s, total_per_mt)
-    else:
-        model.add(max_s == 0)
-        model.add(min_s == 0)
+        mn = int(mt.get("min_shifts_per_month") or 0)
+        if mn <= 0:
+            mn = 0
+        excess = model.new_int_var(0, num_days, f"excess_{mt['name']}")
+        model.add(excess >= mt_total - mn)
+        # quadratic-ish: excess^2 via auxiliary
+        excess_sq = model.new_int_var(0, num_days * num_days, f"excess_sq_{mt['name']}")
+        model.add_multiplication_equality(excess_sq, [excess, excess])
+        excess_terms.append(excess_sq)
 
-    tw_balance_terms = []
-    all_tw = set()
-    for shift, pos, pos_name, slot_i in expanded:
-        tw = isinstance(pos, dict) and (pos.get("time_window_name") or "").strip() or None
-        if tw:
-            all_tw.add(tw)
-
-    for tw_idx, tw in enumerate(sorted(all_tw)):
-        eligible_mts = [
-            mt for mt in mt_list
-            if any(_window_contains(catalog, sw, tw) for sw in (mt.get("time_windows") or []))
-        ]
-        if len(eligible_mts) < 2:
-            continue
-        tw_positions = [
-            (shift, pos, pos_name, slot_i) for shift, pos, pos_name, slot_i in expanded
-            if isinstance(pos, dict) and (pos.get("time_window_name") or "").strip() == tw
-        ]
-        if not tw_positions:
-            continue
-        tw_count_per_mt = []
-        for mt in eligible_mts:
-            cnt = sum(
-                assign[(mt["name"], day, shift["name"], pos_name, slot_i)]
-                for day in range(num_days)
-                for shift, pos, pos_name, slot_i in tw_positions
-            )
-            tw_count_per_mt.append(cnt)
-        tw_max = model.new_int_var(0, num_days, f"tw_max_{tw_idx}")
-        tw_min = model.new_int_var(0, num_days, f"tw_min_{tw_idx}")
-        model.add_max_equality(tw_max, tw_count_per_mt)
-        model.add_min_equality(tw_min, tw_count_per_mt)
-        tw_balance_terms.append(tw_max - tw_min)
-
-    # ลำดับความสำคัญ: (1) ลดช่องว่าง (dummy) ก่อน (2) ค่อยบาลานซ์เวรต่อคน
+    # ลำดับความสำคัญ: (1) ลดช่องว่าง (dummy) ก่อน (2) ยื้อให้ติด min
     # ใช้ penalty สูงมากเพื่อให้ solver ไม่ยอมเพิ่ม dummy แค่เพื่อให้ทุกคนได้แค่ min เท่ากัน
     DUMMY_PENALTY = 1_000_000
     dummy_terms = [
@@ -972,11 +939,11 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
         if _is_slot_active_on_day(shift, pos, day, start_date, holiday_set)
     ]
 
-    balance_obj = (max_s - min_s) * 10 + sum(tw_balance_terms) if tw_balance_terms else (max_s - min_s)
+    excess_obj = sum(excess_terms) * EXCESS_PENALTY if excess_terms else 0
     spacing_obj = sum(consecutive_penalty_terms) * 5 if consecutive_penalty_terms else 0
     together_obj = sum(together_penalty_terms) * 3 if together_penalty_terms else 0
     extra_shift_obj = sum(extra_shift_penalty_terms) if extra_shift_penalty_terms else 0
-    total_obj = balance_obj + spacing_obj + together_obj + extra_shift_obj
+    total_obj = excess_obj + spacing_obj + together_obj + extra_shift_obj
 
     # ยัดคนที่ skill level สูงกว่าเข้าไปก่อน (ตำแหน่งที่ต้องการทักษะ) — CP-SAT ใช้ integer เท่านั้น
     skill_pref_terms = []
