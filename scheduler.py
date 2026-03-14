@@ -225,7 +225,7 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
             and available_on_day(mt, day)
             and _staff_can_work_position(mt, pos, catalog)
         )
-        # นับวันที่มี slot ลงได้อย่างน้อย 1 (จำกัด 1 shift/วัน)
+        # นับวันที่มี slot ลงได้อย่างน้อย 1 (soft limit — ตอนนี้ยอมหลายเวร/วันได้)
         available_days = sum(
             1 for day in range(num_days)
             if available_on_day(mt, day)
@@ -414,15 +414,30 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
             model.add(sum(day_vars) == 0).only_enforce_if(h.negated())
             has_work[(mt["name"], day)] = h
 
+    # --- Soft constraint: จำนวนเวรต่อวันต่อคน ---
+    # เป้าหมาย: 1 เวร/วัน ดีที่สุด แต่ยอมให้มากกว่าได้ถ้าจำเป็น
+    # penalty เพิ่มขึ้นแบบ exponential เพื่อให้ solver กระจายเวรก่อนยัดคนเดิม
+    MAX_SHIFTS_PER_DAY = len(shift_list)  # upper bound = จำนวนกะทั้งหมด
+    EXTRA_SHIFT_PENALTY_BASE = 50_000  # penalty สำหรับเวรที่ 2 ในวัน
+    EXTRA_SHIFT_PENALTY_SCALE = 3      # เวรที่ 3 = base*3, เวรที่ 4 = base*9, ...
+
+    extra_shift_penalty_terms = []
     for mt in mt_list:
         for day in range(num_days):
-            model.add(
-                sum(
-                    assign[(mt["name"], day, shift["name"], pos_name, slot_i)]
-                    for shift, pos, pos_name, slot_i in expanded
-                )
-                <= 1
+            day_total = sum(
+                assign[(mt["name"], day, shift["name"], pos_name, slot_i)]
+                for shift, pos, pos_name, slot_i in expanded
             )
+            # สำหรับเวรที่ k (k >= 2): สร้าง bool var "คนนี้อยู่ >= k เวรวันนี้"
+            for k in range(2, MAX_SHIFTS_PER_DAY + 1):
+                over_k = model.new_bool_var(
+                    f"over{k}_{mt['name'].replace(' ','_')}_d{day}"
+                )
+                model.add(day_total >= k).only_enforce_if(over_k)
+                model.add(day_total <= k - 1).only_enforce_if(over_k.negated())
+                # penalty เพิ่มแบบ exponential: เวรที่ 2 = base, ที่ 3 = base*scale, ...
+                penalty = EXTRA_SHIFT_PENALTY_BASE * (EXTRA_SHIFT_PENALTY_SCALE ** (k - 2))
+                extra_shift_penalty_terms.append(over_k * penalty)
 
     # off_days = วันหยุดประจำสัปดาห์ (0=จันทร์ … 6=อาทิตย์) — ห้ามจัดทุกวันที่มี weekday นี้
     for mt in mt_list:
@@ -644,7 +659,13 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
                         continue
                     n2_in_shift = [assign[(n2, day, sn, pn, si)] for s, _, pn, si in expanded if s["name"] == sn]
                     n1_in_shift = [assign[(n1, day, sn, pn, si)] for s, _, pn, si in expanded if s["name"] == sn]
-                    if n2_in_shift and n1_in_shift:
+                    if not n2_in_shift:
+                        continue
+                    if not n1_in_shift:
+                        # n1 ไม่มีสิทธิ์อยู่กะนี้เลย → n2 ก็ต้องห้ามด้วย
+                        for v in n2_in_shift:
+                            model.add(v == 0)
+                    else:
                         model.add(sum(n2_in_shift) <= sum(n1_in_shift))
 
     # --- Soft penalty for consecutive working days (no hard limit) ---
@@ -725,7 +746,8 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
     balance_obj = (max_s - min_s) * 10 + sum(tw_balance_terms) if tw_balance_terms else (max_s - min_s)
     spacing_obj = sum(consecutive_penalty_terms) * 5 if consecutive_penalty_terms else 0
     together_obj = sum(together_penalty_terms) * 3 if together_penalty_terms else 0
-    total_obj = balance_obj + spacing_obj + together_obj
+    extra_shift_obj = sum(extra_shift_penalty_terms) if extra_shift_penalty_terms else 0
+    total_obj = balance_obj + spacing_obj + together_obj + extra_shift_obj
 
     # ยัดคนที่ skill level สูงกว่าเข้าไปก่อน (ตำแหน่งที่ต้องการทักษะ) — CP-SAT ใช้ integer เท่านั้น
     skill_pref_terms = []

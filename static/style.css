@@ -582,6 +582,13 @@ textarea:focus {
 
 .cell-dummy:hover { background: #fca5a5; }
 
+/* ===== Multi-shift highlight ===== */
+.cell-multi-shift {
+  background: #fef3c7;
+  border-radius: 3px;
+  padding: 1px 3px;
+}
+
 /* ===== Editable filled slots ===== */
 .cell-name {
   cursor: pointer;

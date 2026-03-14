@@ -835,6 +835,13 @@ function renderSchedule(data, staffList) {
   const shiftNames = shiftsMeta.map((m) => m.name);
   const hasRooms = shiftsMeta.some((m) => m.room);
 
+  // นับจำนวนเวร/วัน ของแต่ละคน สำหรับ highlight multi-shift
+  const staffDayCount = {};
+  data.slots.filter(s => !s.is_dummy).forEach(s => {
+    const key = `${s.staff_name}-${s.day}`;
+    staffDayCount[key] = (staffDayCount[key] || 0) + 1;
+  });
+
   // Header rows:
   // 1) Room group (optional)
   // 2) Shift name
@@ -917,7 +924,10 @@ function renderSchedule(data, staffList) {
           } else if (s.is_dummy) {
             html += `<td class="td-has-dummy${roomSep}"><span class="cell-dummy" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" title="คลิกเพื่อมอบหมาย">ว่าง</span></td>`;
           } else {
-            const nameSpan = `<span class="cell-name" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" data-name="${escapeHtml(s.staff_name)}" title="คลิกเพื่อเปลี่ยน">${escapeHtml(s.staff_name)}</span>`;
+            const isMulti = staffDayCount[`${s.staff_name}-${day}`] > 1;
+            const multiCls = isMulti ? " cell-multi-shift" : "";
+            const multiTitle = isMulti ? ` ⚠ อยู่ ${staffDayCount[`${s.staff_name}-${day}`]} เวรวันนี้` : "";
+            const nameSpan = `<span class="cell-name${multiCls}" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" data-name="${escapeHtml(s.staff_name)}" title="คลิกเพื่อเปลี่ยน${multiTitle}">${escapeHtml(s.staff_name)}${isMulti ? " ⚡" : ""}</span>`;
             const content = s.time_window ? `${nameSpan} <small class="tw-label">(${escapeHtml(s.time_window)})</small>` : nameSpan;
             html += `<td${roomSep ? ` class="${roomSep.trim()}"` : ""}>${content}</td>`;
           }
@@ -2196,6 +2206,27 @@ document.getElementById("run_schedule").addEventListener("click", async () => {
     } else {
       msg.textContent = "สร้างตารางเรียบร้อย (Run #" + data.run_id + ")";
       msg.className = "message success";
+    }
+    // แจ้งเตือนถ้ามีคนถูกจัดมากกว่า 1 เวร/วัน
+    if (data.multi_shift_count > 0) {
+      const details = (data.multi_shift_details || []);
+      const startDate = _appSettings?.schedule_start_date ? new Date(_appSettings.schedule_start_date) : null;
+      const lines = details.map(d => {
+        let dayLabel = "วันที่ " + (d.day + 1);
+        if (startDate) {
+          const dt = new Date(startDate);
+          dt.setDate(dt.getDate() + d.day);
+          dayLabel = dt.toLocaleDateString("th-TH", {day:"numeric",month:"short"});
+        }
+        return `<li>${escapeHtml(d.staff_name)} — ${dayLabel} (${d.shifts_on_day} เวร)</li>`;
+      }).join("");
+      const multiMsg = document.createElement("div");
+      multiMsg.className = "message info";
+      multiMsg.style.marginTop = "8px";
+      multiMsg.innerHTML = `<strong>ℹ มีเจ้าหน้าที่ ${data.multi_shift_count} รายการที่อยู่มากกว่า 1 เวร/วัน</strong> ` +
+        `(ระบบจัดให้เพราะคนไม่พอ)` +
+        `<details style="margin-top:4px"><summary>ดูรายละเอียด</summary><ul>${lines}</ul></details>`;
+      msg.parentNode.insertBefore(multiMsg, msg.nextSibling);
     }
     await refreshSettings();
     await refreshSchedule();

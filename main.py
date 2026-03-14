@@ -764,6 +764,7 @@ def api_run_schedule(
 
     # ถ้ามี dummy slots → แจ้งเตือน + วิเคราะห์สาเหตุ
     dummy_slots = [s for s in slots if s.get("is_dummy")]
+    real_slots = [s for s in slots if not s.get("is_dummy")]
     result = {"run_id": run_id, "schedule": data}
     if dummy_slots:
         hints = diagnose_infeasible(mt_list, shift_list, num_days, start_date_str)
@@ -774,7 +775,20 @@ def api_run_schedule(
     else:
         result["has_dummy"] = False
         result["dummy_count"] = 0
-    logger.info("Schedule run_id=%d saved (slots=%d dummy=%d)", run_id, len(slots), len(dummy_slots))
+
+    # นับคนที่ถูกจัดมากกว่า 1 เวร/วัน
+    from collections import Counter
+    day_counts = Counter((s["staff_name"], s["day"]) for s in real_slots)
+    multi_shift_cases = {k: v for k, v in day_counts.items() if v > 1}
+    result["multi_shift_count"] = len(multi_shift_cases)
+    if multi_shift_cases:
+        # สรุปให้ frontend แสดง
+        details = []
+        for (name, day), count in sorted(multi_shift_cases.items(), key=lambda x: (x[0][1], x[0][0])):
+            details.append({"staff_name": name, "day": day, "shifts_on_day": count})
+        result["multi_shift_details"] = details
+
+    logger.info("Schedule run_id=%d saved (slots=%d dummy=%d multi_shift=%d)", run_id, len(slots), len(dummy_slots), len(multi_shift_cases))
     return result
 
 
