@@ -3161,6 +3161,8 @@ document.getElementById("run_schedule").addEventListener("click", async () => {
         msg.textContent = "สร้างตารางเรียบร้อย (Run #" + data.run_id + ")";
         msg.className = "message success";
       }
+      // เคลียร์ข้อความ multi-shift เก่าก่อน
+      document.querySelectorAll(".multi-shift-msg").forEach(el => el.remove());
       if (data.multi_shift_count > 0) {
         const details = (data.multi_shift_details || []);
         const startDateVal = document.getElementById("schedule_start_date")?.value;
@@ -3175,7 +3177,7 @@ document.getElementById("run_schedule").addEventListener("click", async () => {
           return `<li>${escapeHtml(d.staff_name)} — ${dayLabel} (${d.shifts_on_day} เวร)</li>`;
         }).join("");
         const multiMsg = document.createElement("div");
-        multiMsg.className = "message info";
+        multiMsg.className = "message info multi-shift-msg";
         multiMsg.style.marginTop = "8px";
         multiMsg.innerHTML = `<strong>ℹ มีเจ้าหน้าที่ ${data.multi_shift_count} รายการที่อยู่มากกว่า 1 เวร/วัน</strong> ` +
           `(ระบบจัดให้เพราะคนไม่พอ)` +
