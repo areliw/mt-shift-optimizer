@@ -1612,7 +1612,7 @@ function renderSchedule(data, staffList) {
             const multiCls = isMulti ? " cell-multi-shift" : "";
             const multiTitle = isMulti ? ` ⚠ อยู่ ${staffDayCount[`${s.staff_name}-${day}`]} เวรวันนี้` : "";
             const nameSpan = `<span class="cell-name${multiCls}" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" data-name="${escapeHtml(s.staff_name)}" title="คลิกเพื่อเปลี่ยน${multiTitle}">${escapeHtml(s.staff_name)}${isMulti ? " ⚡" : ""}</span>`;
-            const content = s.time_window ? `${nameSpan} <small class="tw-label">(${escapeHtml(s.time_window)})</small>` : nameSpan;
+            const content = nameSpan;
             html += `<td${roomSep ? ` class="${roomSep.trim()}"` : ""}>${content}</td>`;
           }
         }
