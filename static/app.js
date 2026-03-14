@@ -3,40 +3,177 @@ const _pathParts = window.location.pathname.split('/');
 const WORKSPACE_ID = (_pathParts[1] === 'w' && _pathParts[2]) ? _pathParts[2] : '';
 const API = WORKSPACE_ID ? "/w/" + WORKSPACE_ID + "/api" : "/api";
 
-// ถ้า URL hash มี #t=TOKEN → บันทึก token ลง localStorage แล้วลบออกจาก URL
+// Token: อ่านจาก URL hash (#t=...) หรือ localStorage
+// สำหรับ non-open workspace, token จะอยู่แค่ใน memory (ไม่ persist)
+let _wsToken = '';
 (function() {
   if (!WORKSPACE_ID) return;
   const hash = window.location.hash;
   const m = hash.match(/[#&]t=([0-9a-f]+)/i);
   if (m) {
-    try {
-      const tokens = JSON.parse(localStorage.getItem('ws_tokens') || '{}');
-      tokens[WORKSPACE_ID] = m[1];
-      localStorage.setItem('ws_tokens', JSON.stringify(tokens));
-    } catch {}
+    _wsToken = m[1];
     // ลบ hash ออกจาก URL โดยไม่ reload
     history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+  // fallback: ลอง localStorage (สำหรับ open workspaces ที่เก็บไว้)
+  if (!_wsToken) {
+    try { _wsToken = JSON.parse(localStorage.getItem('ws_tokens') || '{}')[WORKSPACE_ID] || ''; }
+    catch {}
   }
 })();
 
 // Inject X-Workspace-Token on every request to this workspace
 (function() {
   const _WS_PREFIX = WORKSPACE_ID ? '/w/' + WORKSPACE_ID + '/' : null;
-  const _wsToken = (() => {
-    try { return JSON.parse(localStorage.getItem('ws_tokens') || '{}')[WORKSPACE_ID] || ''; }
-    catch { return ''; }
-  })();
-  if (!_WS_PREFIX || !_wsToken) return;
   const _origFetch = window.fetch.bind(window);
   window.fetch = function(url, opts) {
     opts = Object.assign({}, opts);
+    const isRetryAfterLogin = !!opts.__retryAfterLogin;
     const urlStr = typeof url === 'string' ? url : (url && url.url) || '';
-    if (urlStr.startsWith(_WS_PREFIX) || urlStr.startsWith('/w/' + WORKSPACE_ID + '/api')) {
+    if (_WS_PREFIX && _wsToken && (urlStr.startsWith(_WS_PREFIX) || urlStr.startsWith('/w/' + WORKSPACE_ID + '/api'))) {
       opts.headers = Object.assign({'X-Workspace-Token': _wsToken}, opts.headers || {});
     }
-    return _origFetch(url, opts);
+    return _origFetch(url, opts).then(async (resp) => {
+      // ถ้า write ถูกปฏิเสธเพราะ readonly/private → แจ้ง user
+      const method = String(opts.method || 'GET').toUpperCase();
+      const isWrite = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
+      if (resp.status === 403 && isWrite) {
+        const detail = await resp.clone().json().then(d => d && d.detail).catch(() => '');
+        const canUnlock = typeof detail === 'string' && detail.includes('ใส่รหัส');
+        if (canUnlock && !isRetryAfterLogin && WORKSPACE_ID) {
+          const pw = window.prompt('ต้องใส่รหัสเพื่อแก้ไข workspace นี้');
+          if (pw && pw.trim()) {
+            const loginResp = await _origFetch('/api/workspaces/' + WORKSPACE_ID + '/login', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({password: pw.trim()}),
+            });
+            const loginData = await loginResp.json().catch(() => ({}));
+            if (loginResp.ok && loginData.token) {
+              _wsToken = loginData.token;
+              const retryOpts = Object.assign({}, opts, { __retryAfterLogin: true });
+              retryOpts.headers = Object.assign({}, opts.headers || {}, {'X-Workspace-Token': _wsToken});
+              return _origFetch(url, retryOpts);
+            }
+            alert((loginData && loginData.detail) || 'รหัสไม่ถูกต้อง');
+            return resp;
+          }
+        }
+        if (detail) {
+          alert(detail);
+        }
+      }
+      // Rate limit (429)
+      if (resp.status === 429) {
+        alert('คำขอถี่เกินไป กรุณารอสักครู่แล้วลองใหม่');
+      }
+      return resp;
+    });
   };
 })();
+
+// --- Workspace access mode: readonly / private guard ---
+let _wsAccessMode = 'open';
+let _wsIsOwner = false;
+
+function _showPasswordWall(mode) {
+  // แสดงหน้าขอรหัส (private=เข้าไม่ได้เลย, readonly=ดูได้แต่จะแก้ต้องใส่รหัส)
+  const isPrivate = mode === 'private';
+  const title = isPrivate ? 'Workspace นี้เป็นส่วนตัว' : 'ใส่รหัสเพื่อแก้ไข';
+  const desc = isPrivate ? 'ต้องใส่รหัสถึงจะเข้าดูได้' : 'Workspace นี้เปิดให้ดูอย่างเดียว — ใส่รหัสเพื่อแก้ไข';
+
+  const wall = document.createElement('div');
+  wall.id = 'password-wall';
+  wall.style.cssText = isPrivate
+    ? 'position:fixed;inset:0;background:#fff;display:flex;align-items:center;justify-content:center;z-index:99999;font-family:sans-serif'
+    : 'position:fixed;top:0;left:0;right:0;background:#fff3cd;color:#856404;text-align:center;padding:10px 16px;font-size:0.9rem;z-index:9999;border-bottom:1px solid #ffc107;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap';
+
+  if (isPrivate) {
+    wall.innerHTML =
+      '<div style="text-align:center;max-width:360px;width:100%;padding:20px">' +
+        '<h2 style="color:#333;margin-bottom:8px">' + title + '</h2>' +
+        '<p style="color:#666;margin-bottom:16px">' + desc + '</p>' +
+        '<input type="password" id="pwInput" placeholder="รหัส" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;font-size:1rem;margin-bottom:10px;outline:none">' +
+        '<button id="pwSubmit" style="width:100%;padding:12px;background:#1a73e8;color:#fff;border:none;border-radius:8px;font-size:1rem;cursor:pointer;font-weight:600">เข้าสู่ Workspace</button>' +
+        '<p id="pwError" style="color:#e53935;font-size:0.85rem;margin-top:8px;display:none"></p>' +
+        '<a href="/" style="color:#1a73e8;margin-top:16px;display:inline-block;font-size:0.9rem">กลับหน้าหลัก</a>' +
+      '</div>';
+  } else {
+    wall.innerHTML =
+      '<span>' + desc + '</span>' +
+      '<input type="password" id="pwInput" placeholder="รหัส" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;font-size:0.85rem;width:140px;outline:none">' +
+      '<button id="pwSubmit" style="padding:6px 14px;background:#1a73e8;color:#fff;border:none;border-radius:6px;font-size:0.85rem;cursor:pointer">ปลดล็อก</button>' +
+      '<span id="pwError" style="color:#e53935;font-size:0.8rem;display:none"></span>';
+    document.body.style.paddingTop = '46px';
+  }
+
+  document.body.prepend(wall);
+
+  const pwInput = document.getElementById('pwInput');
+  const pwSubmit = document.getElementById('pwSubmit');
+  const pwError = document.getElementById('pwError');
+
+  async function tryLogin() {
+    const pw = pwInput.value.trim();
+    if (!pw) { pwInput.focus(); return; }
+    pwSubmit.disabled = true;
+    pwSubmit.textContent = '...';
+    try {
+      const r = await fetch('/api/workspaces/' + WORKSPACE_ID + '/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({password: pw})
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        pwError.textContent = data.detail || 'รหัสไม่ถูกต้อง';
+        pwError.style.display = '';
+        pwSubmit.disabled = false;
+        pwSubmit.textContent = isPrivate ? 'เข้าสู่ Workspace' : 'ปลดล็อก';
+        return;
+      }
+      // redirect กลับมาพร้อม token ใน hash (จะถูกอ่านเป็น memory-only)
+      window.location.href = window.location.pathname + '#t=' + encodeURIComponent(data.token)
+      window.location.reload();
+    } catch {
+      pwError.textContent = 'เกิดข้อผิดพลาด';
+      pwError.style.display = '';
+      pwSubmit.disabled = false;
+      pwSubmit.textContent = isPrivate ? 'เข้าสู่ Workspace' : 'ปลดล็อก';
+    }
+  }
+
+  pwSubmit.onclick = tryLogin;
+  pwInput.addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
+  pwInput.focus();
+}
+
+async function _initWorkspaceAccess() {
+  if (!WORKSPACE_ID) return;
+  try {
+    const r = await fetch(API + '/workspace-info');
+    if (r.status === 403) {
+      _showPasswordWall('private');
+      return;
+    }
+    if (!r.ok) return;
+    const info = await r.json();
+    _wsAccessMode = info.access_mode || 'open';
+    _wsIsOwner = info.is_owner || false;
+
+    if (_wsAccessMode === 'readonly' && !_wsIsOwner) {
+      _showPasswordWall('readonly');
+    }
+  } catch {}
+}
+_initWorkspaceAccess();
+
+/** ตรวจว่ามีสิทธิ์แก้ไขมั้ย — ถ้าไม่มีจะ alert แล้ว return false */
+function _canEdit() {
+  if (_wsAccessMode === 'open' || _wsIsOwner) return true;
+  alert('Workspace นี้เป็นแบบดูอย่างเดียว — ต้องมีรหัสเพื่อแก้ไข');
+  return false;
+}
 
 const THAI_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 
@@ -59,6 +196,23 @@ function formatDayLabel(dayIndex, startDate) {
   const month = THAI_MONTHS[date.getMonth()];
   const year = date.getFullYear() + 543;
   return day + " " + month + " " + year;
+}
+
+function getScheduleDayFlags(dayIndex, startDate) {
+  if (!startDate) return { isWeekend: false, isHoliday: false, iso: "" };
+  const [y, m, d] = startDate.split("-").map(Number);
+  const date = new Date(y, m - 1, d + dayIndex);
+  const iso = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+  const weekday = (date.getDay() + 6) % 7;
+  return {
+    isWeekend: weekday >= 5,
+    isHoliday: holidaySet.has(iso),
+    iso,
+  };
 }
 
 async function getSettings() {
@@ -94,9 +248,87 @@ async function loadLatestSchedule() {
 
 const DAY_NAMES = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"];
 
+function canTakeSecondShift(existingShiftNames, targetShiftName) {
+  const normalize = (name) => String(name || "").trim().toLowerCase();
+  const target = normalize(targetShiftName);
+  const existing = Array.isArray(existingShiftNames) ? existingShiftNames.map((n) => normalize(n)).filter(Boolean) : [];
+  if (existing.length === 0) return true;
+  if (existing.length >= 2) return false;
+  if (!target) return false;
+  return existing[0] !== target;
+}
+
+function _buildStaffDayStatusLabel(isBusy, assignedShifts, canDouble, isOff) {
+  if (isOff) return " [วันนี้: off]";
+  const shifts = Array.isArray(assignedShifts) ? assignedShifts.filter(Boolean) : [];
+  if (!shifts.length) return " [วันนี้: ว่าง]";
+  return ` [วันนี้: ${shifts.join(", ")}]`;
+}
+
+function _buildPreviousDayShiftLabel(prevAssignedShifts) {
+  const shifts = Array.isArray(prevAssignedShifts) ? prevAssignedShifts.filter(Boolean) : [];
+  return shifts.length ? ` [เมื่อวาน: ${shifts.join(", ")}]` : " [เมื่อวาน: ว่าง]";
+}
+
+function _buildNextDayShiftLabel(nextAssignedShifts) {
+  const shifts = Array.isArray(nextAssignedShifts) ? nextAssignedShifts.filter(Boolean) : [];
+  return shifts.length ? ` [พรุ่งนี้: ${shifts.join(", ")}]` : " [พรุ่งนี้: ว่าง]";
+}
+
+function _timeToMinutes(text) {
+  const raw = String(text || "").trim();
+  if (!/^\d{2}:\d{2}$/.test(raw)) return NaN;
+  const [hh, mm] = raw.split(":").map(Number);
+  if (Number.isNaN(hh) || Number.isNaN(mm) || mm < 0 || mm > 59) return NaN;
+  if (hh === 24 && mm === 0) return 24 * 60;
+  if (hh < 0 || hh > 23) return NaN;
+  return hh * 60 + mm;
+}
+
+function _windowContains(catalogByName, staffWindowName, positionWindowName) {
+  if (!positionWindowName || !staffWindowName) return true;
+  const pos = catalogByName[positionWindowName];
+  const staff = catalogByName[staffWindowName];
+  if (!pos || !staff) return false;
+  const posStart = _timeToMinutes(pos.start_time);
+  const posEnd = _timeToMinutes(pos.end_time);
+  const staffStart = _timeToMinutes(staff.start_time);
+  const staffEnd = _timeToMinutes(staff.end_time);
+  if ([posStart, posEnd, staffStart, staffEnd].some((n) => Number.isNaN(n))) return false;
+  return staffStart <= posStart && staffEnd >= posEnd;
+}
+
+function _canWorkPositionTimeWindow(mt, day, positionTimeWindowName, startDate) {
+  const twName = (positionTimeWindowName || "").trim();
+  if (!twName) return true;
+  const catalogByName = {};
+  (Array.isArray(timeWindowCatalog) ? timeWindowCatalog : []).forEach((tw) => {
+    if (!tw || !tw.name) return;
+    catalogByName[String(tw.name)] = {
+      start_time: tw.start_time || "",
+      end_time: tw.end_time || "",
+    };
+  });
+
+  let candidateWindows = Array.isArray(mt.time_windows) ? mt.time_windows.filter(Boolean) : [];
+  const dayOverrides = mt.day_shift_overrides && typeof mt.day_shift_overrides === "object" ? mt.day_shift_overrides : {};
+  if (startDate) {
+    const [y, m, d] = startDate.split("-").map(Number);
+    const date = new Date(y, m - 1, d + Number(day || 0));
+    const domKey = String(date.getDate());
+    if (Array.isArray(dayOverrides[domKey]) && dayOverrides[domKey].length) {
+      candidateWindows = dayOverrides[domKey].filter(Boolean);
+    }
+  }
+  if (!candidateWindows.length) return false;
+  return candidateWindows.some((staffWindowName) => _windowContains(catalogByName, String(staffWindowName), twName));
+}
+
 // Shift editor state
 let shiftsCache = [];
 let currentShiftId = null;
+let _lastRenderedSchedule = null;
+let _draggedPositionCard = null;
 
 // Swap state
 let _swapPending = null;
@@ -177,6 +409,106 @@ function getMonthTotalDays() {
     if (y && m) return new Date(y, m, 0).getDate();
   }
   return numDays > 0 ? numDays : 31;
+}
+
+const POSITION_WEEKDAY_OPTIONS = [
+  { value: 0, label: "จ" },
+  { value: 1, label: "อ" },
+  { value: 2, label: "พ" },
+  { value: 3, label: "พฤ" },
+  { value: 4, label: "ศ" },
+  { value: 5, label: "ส" },
+  { value: 6, label: "อา" },
+];
+
+function normalizeDayNumberList(values, min, max) {
+  return Array.from(new Set((values || [])
+    .map((value) => parseInt(value, 10))
+    .filter((value) => !isNaN(value) && value >= min && value <= max)))
+    .sort((a, b) => a - b);
+}
+
+function parseWeekdayList(str) {
+  if (!str || typeof str !== "string") return [];
+  return normalizeDayNumberList(str.split(/[,\s]+/), 0, 6);
+}
+
+function formatDayNumberList(values) {
+  return normalizeDayNumberList(values, 1, 31).join(",");
+}
+
+function formatWeekdayList(values) {
+  return normalizeDayNumberList(values, 0, 6).join(",");
+}
+
+function createPositionChipButton(label, value, isSelected, extraClass = "") {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "position-chip-btn" + (extraClass ? " " + extraClass : "") + (isSelected ? " is-selected" : "");
+  btn.dataset.value = String(value);
+  btn.textContent = label;
+  return btn;
+}
+
+function renderPositionWeekdaySelector(hiddenInput) {
+  const wrap = hiddenInput && hiddenInput.parentElement;
+  if (!wrap) return;
+  const chipsHost = wrap.querySelector(".position-chip-list");
+  if (!chipsHost) return;
+  const selected = new Set(parseWeekdayList(hiddenInput.value));
+  chipsHost.innerHTML = "";
+  POSITION_WEEKDAY_OPTIONS.forEach((item) => {
+    const btn = createPositionChipButton(item.label, item.value, selected.has(item.value));
+    btn.title = DAY_NAMES[item.value] || item.label;
+    btn.addEventListener("click", () => {
+      const next = new Set(parseWeekdayList(hiddenInput.value));
+      if (next.has(item.value)) next.delete(item.value);
+      else next.add(item.value);
+      hiddenInput.value = formatWeekdayList(Array.from(next));
+      renderPositionWeekdaySelector(hiddenInput);
+    });
+    chipsHost.appendChild(btn);
+  });
+  const summary = wrap.querySelector(".position-chip-summary");
+  if (summary) {
+    summary.textContent = selected.size ? "เลือก: " + Array.from(selected).map((value) => DAY_NAMES[value] || value).join(", ") : "ว่าง = ทุกวันที่กะเปิด";
+  }
+}
+
+function renderPositionDateSelector(hiddenInput) {
+  const wrap = hiddenInput && hiddenInput.parentElement;
+  if (!wrap) return;
+  const chipsHost = wrap.querySelector(".position-date-chip-list");
+  if (!chipsHost) return;
+  const monthDays = getMonthTotalDays();
+  const selected = new Set(parseOffDaysOfMonth(hiddenInput.value));
+  chipsHost.innerHTML = "";
+  for (let day = 1; day <= 31; day++) {
+    const isInMonth = day <= monthDays;
+    const btn = createPositionChipButton(String(day), day, selected.has(day), "position-date-chip");
+    if (!isInMonth) {
+      btn.classList.add("is-out-of-range");
+      btn.title = "เกินจำนวนวันของเดือนที่ตั้งไว้";
+    }
+    btn.addEventListener("click", () => {
+      const next = new Set(parseOffDaysOfMonth(hiddenInput.value));
+      if (next.has(day)) next.delete(day);
+      else next.add(day);
+      hiddenInput.value = formatDayNumberList(Array.from(next));
+      renderPositionDateSelector(hiddenInput);
+    });
+    chipsHost.appendChild(btn);
+  }
+  const summary = wrap.querySelector(".position-chip-summary");
+  if (summary) {
+    summary.textContent = selected.size ? "เลือกวันที่: " + Array.from(selected).sort((a, b) => a - b).join(", ") : "ว่าง = ทุกวันที่กะเปิด";
+  }
+}
+
+function refreshPositionDateSelectors() {
+  document.querySelectorAll(".position-active-dates").forEach((hiddenInput) => {
+    renderPositionDateSelector(hiddenInput);
+  });
 }
 
 function renderStaffDetailContent(staff) {
@@ -260,6 +592,92 @@ function renderMinGapRulesInputs(containerEl, rules) {
           "</div>";
       }).join("")
     : "<span class=\"text-muted\">ยังไม่มีกะ — ไปที่หน้ากะเพิ่มก่อน</span>";
+}
+
+function renderMinShiftsByShiftInputs(containerEl, values) {
+  if (!containerEl) return;
+  const list = Array.isArray(shiftsCache) ? shiftsCache : [];
+  const map = new Map();
+  if (values && typeof values === "object" && !Array.isArray(values)) {
+    Object.entries(values).forEach(([shiftName, n]) => {
+      const parsed = parseInt(n, 10);
+      if (shiftName && parsed > 0) map.set(String(shiftName), parsed);
+    });
+  }
+  containerEl.innerHTML = list.length
+    ? list.map((sh) => {
+        const nm = typeof sh === "string" ? sh : sh.name;
+        if (!nm) return "";
+        const val = map.has(nm) ? map.get(nm) : "";
+        return "<div class=\"form-inline\" style=\"margin:0 0 .35rem 0\">" +
+          "<span style=\"min-width:10rem\">" + escapeHtml(nm) + "</span>" +
+          "<input type=\"number\" class=\"min-shifts-by-shift-input\" data-shift=\"" + escapeHtml(nm) + "\" min=\"0\" max=\"31\" placeholder=\"—\" value=\"" + escapeHtml(String(val)) + "\" style=\"width:5rem\" />" +
+          "<span class=\"text-muted\" style=\"font-size:.82rem;margin:0\">เวร/เดือน</span>" +
+          "</div>";
+      }).join("")
+    : "<span class=\"text-muted\">ยังไม่มีกะ — ไปที่หน้ากะเพิ่มก่อน</span>";
+}
+
+function collectMinShiftsByShift(containerSelector) {
+  const result = {};
+  document.querySelectorAll(containerSelector + " .min-shifts-by-shift-input").forEach((el) => {
+    const shift = (el.dataset.shift || "").trim();
+    const n = el.value !== "" ? parseInt(el.value, 10) : 0;
+    if (shift && n > 0) result[shift] = n;
+  });
+  return result;
+}
+
+/** เพิ่มแถว "วันที่ X → อยู่ได้แค่ช่วง Y,Z" ใน staff form */
+function addDayOverrideRow(containerId, day, allowedWindows) {
+  containerId = containerId || 'staff_day_overrides_list';
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const twList = Array.isArray(timeWindowCatalog) ? timeWindowCatalog : [];
+  const allowed = new Set(allowedWindows || []);
+  const row = document.createElement('div');
+  row.className = 'day-override-row form-inline';
+  row.style.cssText = 'margin:0 0 6px 0;align-items:center';
+  row.innerHTML =
+    '<label style="min-width:4rem">วันที่</label>' +
+    '<input type="number" class="dso-day" min="1" max="31" value="' + (day || '') + '" style="width:4.5rem" placeholder="เช่น 7" />' +
+    '<span style="margin:0 6px;font-size:.85rem">อยู่ได้:</span>' +
+    twList.map(tw => {
+      const nm = typeof tw === 'string' ? tw : tw.name;
+      return '<label class="staff-day-cb"><input type="checkbox" class="dso-tw" value="' + escapeHtml(nm) + '"' +
+        (allowed.has(nm) ? ' checked' : '') + ' /> ' + escapeHtml(nm) + '</label>';
+    }).join(' ') +
+    (twList.length === 0 ? '<span class="text-muted" style="font-size:.82rem">ยังไม่มีช่วงเวลา</span>' : '') +
+    ' <button type="button" class="btn-secondary small" style="padding:2px 6px;font-size:.75rem;color:#e53935" onclick="this.closest(\'.day-override-row\').remove()">ลบ</button>';
+  container.appendChild(row);
+}
+
+/** อ่านค่า day_shift_overrides จาก UI → object {"7": ["เช้า","บ่าย"], ...} */
+function collectDayOverrides(containerId) {
+  containerId = containerId || 'staff_day_overrides_list';
+  const container = document.getElementById(containerId);
+  if (!container) return {};
+  const result = {};
+  container.querySelectorAll('.day-override-row').forEach(row => {
+    const dayInput = row.querySelector('.dso-day');
+    const day = dayInput ? parseInt(dayInput.value, 10) : 0;
+    if (!day || day < 1 || day > 31) return;
+    const tws = Array.from(row.querySelectorAll('.dso-tw:checked')).map(cb => cb.value);
+    if (tws.length > 0) result[String(day)] = tws;
+  });
+  return result;
+}
+
+/** ตั้งค่า day_shift_overrides ใน UI จาก object */
+function renderDayOverrides(containerId, overrides) {
+  containerId = containerId || 'staff_day_overrides_list';
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = '';
+  if (!overrides || typeof overrides !== 'object') return;
+  for (const [day, windows] of Object.entries(overrides)) {
+    addDayOverrideRow(containerId, parseInt(day, 10), windows);
+  }
 }
 
 function renderStaffDetailForm(staff, catalogSkills, catalogTitles, catalogTimeWindows) {
@@ -355,7 +773,7 @@ function renderStaffDetailForm(staff, catalogSkills, catalogTitles, catalogTimeW
     "<input type=\"number\" id=\"staff_edit_min_shifts\" min=\"0\" max=\"31\" placeholder=\"—\" value=\"" + (staff.min_shifts_per_month != null ? staff.min_shifts_per_month : "") + "\" style=\"width:5rem\" />" +
     "<label for=\"staff_edit_max_shifts\">สูงสุด</label>" +
     "<input type=\"number\" id=\"staff_edit_max_shifts\" min=\"0\" max=\"31\" placeholder=\"—\" value=\"" + (staff.max_shifts_per_month != null ? staff.max_shifts_per_month : "") + "\" style=\"width:5rem\" />" +
-    "<span class=\"text-muted\" style=\"font-size:.82rem;margin:0\">ว่างไว้ = ไม่จำกัด</span>" +
+    "<span class=\"text-muted\" style=\"font-size:.82rem;margin:0\">ว่างไว้ = ไม่จำกัด, สูงสุด = 0 คือไม่ให้ลงเวร</span>" +
     "</div></fieldset>" +
     "<fieldset class=\"form-section\"><legend>ห่างกันอย่างน้อย (วัน)</legend>" +
     "<div class=\"form-inline\" style=\"margin-bottom:0\">" +
@@ -366,6 +784,11 @@ function renderStaffDetailForm(staff, catalogSkills, catalogTitles, catalogTimeW
     "<label class=\"text-muted\" style=\"font-size:.82rem\">กำหนดเว้นขั้นต่ำแยกตามกะ (ใส่ตัวเลขเฉพาะกะที่อยากจำกัด)</label>" +
     "<div id=\"staff_edit_min_gap_rules\" class=\"staff-skills-checkboxes\"></div>" +
     "</div></fieldset>" +
+    "<fieldset class=\"form-section\"><legend>ขั้นต่ำต่อกะรายคน</legend>" +
+    "<div class=\"form-group\" style=\"margin-top:0\">" +
+    "<label class=\"text-muted\" style=\"font-size:.82rem\">ระบุจำนวนเวรขั้นต่ำต่อเดือนเฉพาะกะที่ต้องการ</label>" +
+    "<div id=\"staff_edit_min_shifts_by_shift\" class=\"staff-skills-checkboxes\"></div>" +
+    "</div></fieldset>" +
     "<fieldset class=\"form-section\"><legend>ทักษะ &amp; เวลา</legend>" +
     "<div class=\"form-group\" style=\"margin-top:0\"><label>ทักษะ</label><div id=\"staff_edit_skills\" class=\"staff-skills-checkboxes\">" +
     skillsList +
@@ -373,6 +796,11 @@ function renderStaffDetailForm(staff, catalogSkills, catalogTitles, catalogTimeW
     "<div class=\"form-group\" style=\"margin-top:.5rem\"><label>ช่วงที่อยู่ได้</label><div id=\"staff_edit_time_windows\" class=\"staff-time-windows-checkboxes\">" +
     timeWindowsCheckboxes +
     "</div></div>" +
+    "</fieldset>" +
+    "<fieldset class=\"form-section\"><legend>จำกัดกะเฉพาะวัน</legend>" +
+    "<div style=\"font-size:.82rem;color:#888;margin-bottom:6px\">ระบุวันที่ + เลือกช่วงที่อยู่ได้ (วันที่ไม่ได้ระบุ = อยู่ได้ทุกช่วงตามปกติ)</div>" +
+    "<div id=\"staff_edit_day_overrides_list\"></div>" +
+    "<button type=\"button\" class=\"btn-secondary small\" onclick=\"addDayOverrideRow('staff_edit_day_overrides_list')\">+ เพิ่มวัน</button>" +
     "</fieldset>" +
     "<p id=\"staff_edit_message\" class=\"message\" style=\"display:none\"></p>" +
     "<button type=\"submit\" class=\"btn-primary\">บันทึก</button>" +
@@ -418,6 +846,9 @@ async function showStaffDetail(staffId) {
 
     const editGapRules = document.getElementById("staff_edit_min_gap_rules");
     if (editGapRules) renderMinGapRulesInputs(editGapRules, staff.min_gap_rules || []);
+    const editMinByShift = document.getElementById("staff_edit_min_shifts_by_shift");
+    if (editMinByShift) renderMinShiftsByShiftInputs(editMinByShift, staff.min_shifts_by_shift || {});
+    renderDayOverrides('staff_edit_day_overrides_list', staff.day_shift_overrides || {});
 
     document.querySelectorAll("input[name='staff_edit_month_mode']").forEach((radio) => {
       radio.addEventListener("change", () => {
@@ -479,7 +910,7 @@ async function showStaffDetail(staffId) {
         const res = await fetch(API + "/staff/" + staffId, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, title, off_days, off_days_of_month, skills, time_windows, skill_levels, min_shifts_per_month, max_shifts_per_month, min_gap_days, min_gap_shifts: [], min_gap_rules }),
+          body: JSON.stringify({ name, title, off_days, off_days_of_month, skills, time_windows, skill_levels, min_shifts_per_month, max_shifts_per_month, min_gap_days, min_gap_shifts: [], min_gap_rules, day_shift_overrides: collectDayOverrides('staff_edit_day_overrides_list'), min_shifts_by_shift: collectMinShiftsByShift('#staff_edit_form') }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -577,6 +1008,12 @@ function renderShiftList(items) {
   const groupNames = Object.keys(groups).sort((a, b) => (roomOrder[a] || 99) - (roomOrder[b] || 99) || a.localeCompare(b));
 
   const renderRow = (s) => {
+    const minTitle = (s.min_required_title || "").trim();
+    const minCnt = Math.max(0, parseInt(s.min_required_count, 10) || 0);
+    const legacyMinFt = Math.max(0, parseInt(s.min_fulltime, 10) || 0);
+    const minLabel = (minTitle && minCnt > 0)
+      ? ` | ขั้นต่ำ: ${minTitle} ≥${minCnt}`
+      : (legacyMinFt > 0 ? ` | ขั้นต่ำ(เดิม): เต็มเวลา ≥${legacyMinFt}` : "");
     const posLabel = s.positions && s.positions.length
       ? s.positions.map((p) => {
           const name = typeof p === "string" ? p : p.name;
@@ -594,7 +1031,7 @@ function renderShiftList(items) {
         }).join(" | ")
       : `donor: ${s.donor ?? 0}, xmatch: ${s.xmatch ?? 0}`;
     return `<li data-id="${s.id}">
-        <span class="name">${escapeHtml(s.name)} — ${escapeHtml(posLabel)}</span>
+        <span class="name">${escapeHtml(s.name)} — ${escapeHtml(posLabel + minLabel)}</span>
         <button type="button" class="small btn-edit-shift" data-id="${s.id}">แก้ไข</button>
         <button class="small btn-delete-shift" data-id="${s.id}">ลบ</button>
       </li>`;
@@ -634,10 +1071,16 @@ function hasShiftFormUnsavedChanges() {
   const nameInput = document.getElementById("shift_name");
   const currentName = (nameInput && nameInput.value || "").trim();
   if (currentName !== (shift.name || "").trim()) return true;
-  const mfEl = document.getElementById("shift_min_fulltime");
-  const currentMf = mfEl ? parseInt(mfEl.value, 10) || 0 : 0;
-  const savedMf = parseInt(shift.min_fulltime, 10) || 0;
-  if (currentMf !== savedMf) return true;
+  const minTitleEl = document.getElementById("shift_min_required_title");
+  const minCountEl = document.getElementById("shift_min_required_count");
+  const currentMinTitle = (minTitleEl && minTitleEl.value || "").trim();
+  const currentMinCount = minCountEl ? parseInt(minCountEl.value, 10) || 0 : 0;
+  const savedMinTitle = (shift.min_required_title || "").trim();
+  const savedMinCount = parseInt(shift.min_required_count, 10) || 0;
+  const savedLegacyMinFt = parseInt(shift.min_fulltime, 10) || 0;
+  const comparableSavedCount = savedMinTitle ? savedMinCount : savedLegacyMinFt;
+  if (currentMinTitle !== savedMinTitle) return true;
+  if (currentMinCount !== comparableSavedCount) return true;
   const currentPositions = collectShiftPositions();
   const savedPositions = shift.positions || [];
   if (currentPositions.length !== savedPositions.length) return true;
@@ -654,16 +1097,34 @@ function hasShiftFormUnsavedChanges() {
   return false;
 }
 
+/** อ่านค่า active_days จาก checkboxes → string เช่น "0,1,4" หรือ null (ทุกวัน/ไม่เลือก) */
+function _getActiveDaysFromChecks() {
+  const checks = document.querySelectorAll('#shift_active_days_checks input[data-ad]');
+  const vals = [];
+  checks.forEach(c => { if (c.checked) vals.push(c.value); });
+  return vals.length > 0 && vals.length < 7 ? vals.join(',') : null;
+}
+/** ตั้งค่า checkboxes จาก active_days string เช่น "0,1,4" */
+function _setActiveDaysChecks(str) {
+  const checks = document.querySelectorAll('#shift_active_days_checks input[data-ad]');
+  const vals = new Set((str || '').split(',').map(s => s.trim()).filter(s => s));
+  const allUnchecked = vals.size === 0;
+  checks.forEach(c => { c.checked = allUnchecked || vals.has(c.value); });
+}
+
 function resetShiftForm() {
   currentShiftId = null;
   const nameInput = document.getElementById("shift_name");
   if (nameInput) nameInput.value = "";
+  _setActiveDaysChecks("");
   const adEl = document.getElementById("shift_active_days");
   if (adEl) adEl.value = "";
   const ihEl = document.getElementById("shift_include_holidays");
   if (ihEl) ihEl.checked = false;
-  const mfEl = document.getElementById("shift_min_fulltime");
-  if (mfEl) mfEl.value = "0";
+  const minTitleEl = document.getElementById("shift_min_required_title");
+  const minCountEl = document.getElementById("shift_min_required_count");
+  if (minTitleEl) minTitleEl.value = "";
+  if (minCountEl) minCountEl.value = "0";
   const list = document.getElementById("shift_positions_list");
   if (list) {
     list.innerHTML = "";
@@ -686,12 +1147,26 @@ function startEditShift(shiftId) {
   currentShiftId = shift.id;
   const nameInput = document.getElementById("shift_name");
   if (nameInput) nameInput.value = shift.name || "";
-  const adEl = document.getElementById("shift_active_days");
-  if (adEl) adEl.value = shift.active_days || "";
+  _setActiveDaysChecks(shift.active_days || "");
   const ihEl = document.getElementById("shift_include_holidays");
   if (ihEl) ihEl.checked = !!shift.include_holidays;
-  const mfEl = document.getElementById("shift_min_fulltime");
-  if (mfEl) mfEl.value = String(Math.max(0, parseInt(shift.min_fulltime, 10) || 0));
+  const minTitleEl = document.getElementById("shift_min_required_title");
+  const minCountEl = document.getElementById("shift_min_required_count");
+  const savedMinTitle = (shift.min_required_title || "").trim();
+  const savedMinCount = Math.max(0, parseInt(shift.min_required_count, 10) || 0);
+  const legacyMinFt = Math.max(0, parseInt(shift.min_fulltime, 10) || 0);
+  if (minTitleEl) {
+    minTitleEl.value = savedMinTitle || "";
+    // รองรับข้อมูลเก่า: ถ้ามี min_fulltime เดิม แต่ยังไม่มีฉายาขั้นต่ำ ให้ prefill ฉายาเต็มเวลา
+    if (!savedMinTitle && legacyMinFt > 0) {
+      const fulltimeTitle = (window.titlesCatalog || []).find((t) => t && t.type === "fulltime");
+      if (fulltimeTitle && fulltimeTitle.name) minTitleEl.value = fulltimeTitle.name;
+    }
+  }
+  if (minCountEl) {
+    const effective = savedMinTitle ? savedMinCount : legacyMinFt;
+    minCountEl.value = String(Math.max(0, effective || 0));
+  }
   const list = document.getElementById("shift_positions_list");
   if (list) {
     list.innerHTML = "";
@@ -706,7 +1181,8 @@ function startEditShift(shiftId) {
       const maxPerWeek = typeof p === "object" && p.max_per_week != null ? p.max_per_week : 0;
       const activeWeekdays = typeof p === "object" && p.active_weekdays ? p.active_weekdays : "";
       if (typeof addPositionRow === "function") {
-        addPositionRow(name, note, slotCount, tw, reqSkill, minLvl, allowedTitles, maxPerWeek, activeWeekdays);
+        const activeDates = typeof p === "object" && p.active_dates ? p.active_dates : "";
+        addPositionRow(name, note, slotCount, tw, reqSkill, minLvl, allowedTitles, maxPerWeek, activeWeekdays, activeDates);
       }
     });
   }
@@ -732,47 +1208,16 @@ function formatApiError(d) {
   return "";
 }
 
-function renderSchedule(data, staffList) {
-  const meta = document.getElementById("schedule_meta");
-  const wrap = document.getElementById("schedule_table_wrap");
-  const exportLink = document.getElementById("export_csv");
-  // Clear dummy warning banner ถ้ามี
-  const oldWarn = document.getElementById("dummy_warn_banner");
-  if (oldWarn) oldWarn.remove();
-
-  if (!data) {
-    meta.textContent = "ยังไม่มีตาราง — กด \"สร้างตารางเวร\" เพื่อสร้าง";
-    wrap.innerHTML = "";
-    exportLink.style.display = "none";
-    return;
-  }
+function buildScheduleGridModel(data) {
+  if (!data) return null;
   const runId = data.run_id;
   const startDate = data.start_date || null;
   const maxDayInSlots = data.slots.length ? Math.max(...data.slots.map((s) => s.day), 0) + 1 : 0;
   const displayDays = Math.max(data.num_days || 0, maxDayInSlots);
-  const dateRange = startDate && displayDays > 0
-    ? formatDayLabel(0, startDate) + " – " + formatDayLabel(displayDays - 1, startDate)
-    : "";
-  const dummyCount = data.slots.filter((s) => s.is_dummy).length;
-  const metaSuffix = dummyCount > 0 ? `  ⚠ ${dummyCount} ช่องยังว่าง` : "";
-  meta.textContent = `Run #${runId} — สร้างเมื่อ ${data.created_at} (${displayDays} วัน)${dateRange ? " · " + dateRange : ""}${metaSuffix}`;
-  exportLink.href = API + "/schedule/export/csv?run_id=" + runId;
-  exportLink.style.display = "inline";
-
-  // Banner แจ้งเตือนถ้ามี dummy slots
-  if (dummyCount > 0) {
-    const warn = document.createElement("div");
-    warn.id = "dummy_warn_banner";
-    warn.className = "dummy-warn-banner";
-    warn.innerHTML = `<strong>⚠ จัดไม่ครบ ${dummyCount} ช่อง</strong> — บุคลากรไม่พอหรือมีข้อจำกัด คลิกช่อง <span class="cell-dummy-preview">ว่าง</span> เพื่อมอบหมายเอง`;
-    wrap.parentElement.insertBefore(warn, wrap);
-  }
-
   const days = [];
   for (let d = 0; d < displayDays; d++) days.push(d);
   const posKey = data.slots.length && data.slots[0].position != null ? "position" : "room";
 
-  // Build byDayShiftPosSlot: "day-shift-pos" → { slotIdx: slot }
   const byDayShiftPosSlot = {};
   data.slots.forEach((s) => {
     const pos = s[posKey] || s.room || s.position || "";
@@ -781,9 +1226,8 @@ function renderSchedule(data, staffList) {
     byDayShiftPosSlot[key][s.slot_index ?? 0] = s;
   });
 
-  // Build shiftPositions (ordered) and shiftSlotCounts from definitions
   const shiftPositions = {};
-  const shiftSlotCounts = {}; // sn -> pos -> count
+  const shiftSlotCounts = {};
   (shiftsCache || []).forEach((sh) => {
     if (sh.positions && sh.positions.length) {
       shiftPositions[sh.name] = sh.positions.map((p) => (typeof p === "string" ? p : p.name));
@@ -794,7 +1238,6 @@ function renderSchedule(data, staffList) {
       });
     }
   });
-  // Augment with positions found in slots not covered by definition
   data.slots.forEach((s) => {
     const sn = s.shift_name;
     const pos = s[posKey] || s.room || s.position || "";
@@ -804,12 +1247,12 @@ function renderSchedule(data, staffList) {
     if (!shiftSlotCounts[sn][pos]) shiftSlotCounts[sn][pos] = 1;
   });
 
-  function _posSlotCount(sn, pos) { return (shiftSlotCounts[sn] && shiftSlotCounts[sn][pos]) || 1; }
-  function _shiftTotalCols(sn) {
-    return (shiftPositions[sn] || []).reduce((acc, p) => acc + _posSlotCount(sn, p), 0) || 1;
+  function posSlotCount(sn, pos) {
+    return (shiftSlotCounts[sn] && shiftSlotCounts[sn][pos]) || 1;
   }
-
-  // --- Group/sort shifts by "room" suffix for readability (Template 5) ---
+  function shiftTotalCols(sn) {
+    return (shiftPositions[sn] || []).reduce((acc, p) => acc + posSlotCount(sn, p), 0) || 1;
+  }
   function parseRoomAndKind(shiftName) {
     const s = String(shiftName || "").trim();
     let kind = "other";
@@ -830,10 +1273,143 @@ function renderSchedule(data, staffList) {
       const ka = kindOrder[a.kind] || 99;
       const kb = kindOrder[b.kind] || 99;
       if (ka !== kb) return ka - kb;
-      return a.name.localeCompare(b.name);
+      return a.name.localeCompare(b.name, "th");
     });
   const shiftNames = shiftsMeta.map((m) => m.name);
   const hasRooms = shiftsMeta.some((m) => m.room);
+  const shiftActiveOnDay = {};
+  data.slots.forEach((s) => {
+    shiftActiveOnDay[`${s.day}-${s.shift_name}`] = true;
+  });
+
+  return {
+    runId,
+    startDate,
+    displayDays,
+    days,
+    posKey,
+    byDayShiftPosSlot,
+    shiftPositions,
+    shiftsMeta,
+    shiftNames,
+    hasRooms,
+    shiftActiveOnDay,
+    posSlotCount,
+    shiftTotalCols,
+  };
+}
+
+function csvEscape(value) {
+  const text = value == null ? "" : String(value);
+  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function downloadScheduleTableCsv(data) {
+  const grid = buildScheduleGridModel(data);
+  if (!grid) return;
+  const rows = [];
+  const expandedCols = [];
+
+  grid.shiftNames.forEach((sn) => {
+    const meta = grid.shiftsMeta.find((m) => m.name === sn) || {};
+    const room = meta.room || "";
+    (grid.shiftPositions[sn] || ["ช่อง"]).forEach((pos) => {
+      const cnt = grid.posSlotCount(sn, pos);
+      for (let si = 0; si < cnt; si++) {
+        expandedCols.push({
+          shiftName: sn,
+          room,
+          pos,
+          slotIndex: si,
+          label: cnt > 1 ? `${pos} ${si + 1}` : pos,
+        });
+      }
+    });
+  });
+
+  if (grid.hasRooms) {
+    rows.push(["วัน", ...expandedCols.map((col) => col.room || "อื่นๆ")]);
+  }
+  rows.push([grid.hasRooms ? "" : "วัน", ...expandedCols.map((col) => col.shiftName)]);
+  rows.push(["", ...expandedCols.map((col) => col.label)]);
+
+  grid.days.forEach((day) => {
+    const row = [formatDayLabel(day, grid.startDate)];
+    expandedCols.forEach((col) => {
+      const slotMap = grid.byDayShiftPosSlot[`${day}-${col.shiftName}-${col.pos}`] || {};
+      const slot = slotMap[col.slotIndex];
+      if (!slot) {
+        row.push(grid.shiftActiveOnDay[`${day}-${col.shiftName}`] ? "" : "—");
+        return;
+      }
+      if (slot.is_dummy) {
+        row.push("ว่าง");
+        return;
+      }
+      row.push(slot.time_window ? `${slot.staff_name} (${slot.time_window})` : slot.staff_name);
+    });
+    rows.push(row);
+  });
+
+  const csvText = "\ufeff" + rows.map((row) => row.map(csvEscape).join(",")).join("\r\n");
+  const blob = new Blob([csvText], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `schedule-run-${grid.runId || "latest"}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function renderSchedule(data, staffList) {
+  const meta = document.getElementById("schedule_meta");
+  const wrap = document.getElementById("schedule_table_wrap");
+  const exportLink = document.getElementById("export_csv");
+  // Clear dummy warning banner ถ้ามี
+  const oldWarn = document.getElementById("dummy_warn_banner");
+  if (oldWarn) oldWarn.remove();
+
+  if (!data) {
+    _lastRenderedSchedule = null;
+    meta.textContent = "ยังไม่มีตาราง — กด \"สร้างตารางเวร\" เพื่อสร้าง";
+    wrap.innerHTML = "";
+    exportLink.style.display = "none";
+    return;
+  }
+  _lastRenderedSchedule = data;
+  const grid = buildScheduleGridModel(data);
+  const runId = grid.runId;
+  const startDate = grid.startDate;
+  const displayDays = grid.displayDays;
+  const dateRange = startDate && displayDays > 0
+    ? formatDayLabel(0, startDate) + " – " + formatDayLabel(displayDays - 1, startDate)
+    : "";
+  const dummyCount = data.slots.filter((s) => s.is_dummy).length;
+  const metaSuffix = dummyCount > 0 ? `  ⚠ ${dummyCount} ช่องยังว่าง` : "";
+  meta.textContent = `Run #${runId} — สร้างเมื่อ ${data.created_at} (${displayDays} วัน)${dateRange ? " · " + dateRange : ""}${metaSuffix}`;
+  exportLink.href = "#";
+  exportLink.style.display = "inline";
+
+  // Banner แจ้งเตือนถ้ามี dummy slots
+  if (dummyCount > 0) {
+    const warn = document.createElement("div");
+    warn.id = "dummy_warn_banner";
+    warn.className = "dummy-warn-banner";
+    warn.innerHTML = `<strong>⚠ ว่าง ${dummyCount} ช่อง</strong> — คลิก <span class="cell-dummy-preview">ว่าง</span> เพื่อมอบหมายเอง`;
+    wrap.parentElement.insertBefore(warn, wrap);
+  }
+
+  const days = grid.days;
+  const byDayShiftPosSlot = grid.byDayShiftPosSlot;
+  const shiftPositions = grid.shiftPositions;
+  const shiftsMeta = grid.shiftsMeta;
+  const shiftNames = grid.shiftNames;
+  const hasRooms = grid.hasRooms;
+  const _posSlotCount = grid.posSlotCount;
+  const _shiftTotalCols = grid.shiftTotalCols;
 
   // Header rows:
   // 1) Room group (optional)
@@ -887,15 +1463,15 @@ function renderSchedule(data, staffList) {
   });
   html += "</tr></thead><tbody>";
   // Track which shifts are completely inactive on a day (no slots at all across all positions)
-  const shiftActiveOnDay = {};
-  data.slots.forEach((s) => {
-    const key = `${s.day}-${s.shift_name}`;
-    shiftActiveOnDay[key] = true;
-  });
+  const shiftActiveOnDay = grid.shiftActiveOnDay;
 
   days.forEach((day) => {
     const dayLabel = formatDayLabel(day, startDate);
-    html += `<tr><td>${escapeHtml(dayLabel)}</td>`;
+    const dayFlags = getScheduleDayFlags(day, startDate);
+    const rowClasses = ["schedule-day-row"];
+    if (dayFlags.isWeekend) rowClasses.push("is-weekend");
+    if (dayFlags.isHoliday) rowClasses.push("is-holiday");
+    html += `<tr class="${rowClasses.join(" ")}"><td>${escapeHtml(dayLabel)}</td>`;
     let prevRoom = null;
     shiftNames.forEach((sn) => {
       const meta = shiftsMeta.find((m) => m.name === sn) || {};
@@ -933,18 +1509,34 @@ function renderSchedule(data, staffList) {
   // Attach click handlers to dummy spans
   const sf = staffList || [];
   // busyByDay[day] = Set(staff_name) who already has any non-dummy slot that day
+  // busyByDayInfo[day][staff_name] = Set(shift_name) for clearer UX message
   const busyByDay = {};
+  const busyByDayInfo = {};
+  const prevDayInfo = {};
+  const nextDayInfo = {};
   (data.slots || []).forEach((s) => {
     if (s.is_dummy) return;
     const d = Number(s.day);
     if (!busyByDay[d]) busyByDay[d] = new Set();
+    if (!busyByDayInfo[d]) busyByDayInfo[d] = {};
+    if (!busyByDayInfo[d][s.staff_name]) busyByDayInfo[d][s.staff_name] = new Set();
     busyByDay[d].add(s.staff_name);
+    busyByDayInfo[d][s.staff_name].add(String(s.shift_name || ""));
+    const nextDay = d + 1;
+    if (!prevDayInfo[nextDay]) prevDayInfo[nextDay] = {};
+    if (!prevDayInfo[nextDay][s.staff_name]) prevDayInfo[nextDay][s.staff_name] = new Set();
+    prevDayInfo[nextDay][s.staff_name].add(String(s.shift_name || ""));
+
+    const prevDay = d - 1;
+    if (!nextDayInfo[prevDay]) nextDayInfo[prevDay] = {};
+    if (!nextDayInfo[prevDay][s.staff_name]) nextDayInfo[prevDay][s.staff_name] = new Set();
+    nextDayInfo[prevDay][s.staff_name].add(String(s.shift_name || ""));
   });
   wrap.querySelectorAll(".cell-dummy").forEach((span) => {
-    span.addEventListener("click", () => handleDummyClick(span, sf, runId, busyByDay, startDate));
+    span.addEventListener("click", () => handleDummyClick(span, sf, runId, busyByDay, busyByDayInfo, prevDayInfo, nextDayInfo, startDate));
   });
   wrap.querySelectorAll(".cell-name").forEach((span) => {
-    span.addEventListener("click", () => handleNameClick(span, sf, runId, busyByDay, startDate));
+    span.addEventListener("click", () => handleNameClick(span, sf, runId, busyByDay, busyByDayInfo, prevDayInfo, nextDayInfo, startDate));
   });
 
   // Summary stats
@@ -957,48 +1549,221 @@ function renderScheduleSummary(slots, staffList) {
   if (old) old.remove();
   if (!slots || slots.length === 0) return;
 
-  // นับเวรต่อคน (ไม่นับ dummy)
   const realSlots = slots.filter((s) => !s.is_dummy);
-  const countByStaff = {};
+  if (realSlots.length === 0) return;
+
+  const totalSlots  = slots.length;
+  const filledSlots = realSlots.length;
+  const emptySlots  = totalSlots - filledSlots;
+  const fillRate    = totalSlots > 0 ? Math.round((filledSlots / totalSlots) * 100) : 0;
+
+  // Per-staff totals and per-shift breakdown
+  const countByStaff = {};  // name → total
+  const byStaffShift = {};  // name → shiftName → count
+
   realSlots.forEach((s) => {
     countByStaff[s.staff_name] = (countByStaff[s.staff_name] || 0) + 1;
+    if (!byStaffShift[s.staff_name]) byStaffShift[s.staff_name] = {};
+    byStaffShift[s.staff_name][s.shift_name] = (byStaffShift[s.staff_name][s.shift_name] || 0) + 1;
   });
-  const counts = Object.values(countByStaff);
-  if (counts.length === 0) return;
-  const maxC = Math.max(...counts);
-  const minC = Math.min(...counts);
-  const spread = maxC - minC;
-  const dummyCount = slots.filter((s) => s.is_dummy).length;
 
-  // เรียงชื่อตาม count มากก่อน
-  const sorted = Object.entries(countByStaff).sort((a, b) => b[1] - a[1]);
+  // Per shift/position slot coverage
+  const byShiftPos = {};  // "sn§pos" → { shift, pos, filled, empty }
+  slots.forEach((s) => {
+    const pos = (s.position || s.room || "").trim();
+    const key = `${s.shift_name}§${pos}`;
+    if (!byShiftPos[key]) byShiftPos[key] = { shift: s.shift_name, pos, filled: 0, empty: 0 };
+    if (s.is_dummy) byShiftPos[key].empty++;
+    else            byShiftPos[key].filled++;
+  });
+
+  const counts      = Object.values(countByStaff);
+  const maxC        = Math.max(...counts);
+  const minC        = Math.min(...counts);
+  const spread      = maxC - minC;
+  const sortedStaff = Object.entries(countByStaff).sort((a, b) => b[1] - a[1]);
+  const shiftColumns = Array.from(new Set(realSlots.map((s) => s.shift_name))).sort((a, b) => a.localeCompare(b, "th"));
+  const totalByShift = {};
+  shiftColumns.forEach((shiftName) => {
+    totalByShift[shiftName] = realSlots.reduce((sum, slot) => sum + (slot.shift_name === shiftName ? 1 : 0), 0);
+  });
+
+  // ── Tab 1: ภาพรวม ─────────────────────────────────────────────
+  const overviewHtml = `
+    <div class="summary-kpi-row">
+      <div class="summary-kpi">
+        <span class="kpi-val">${totalSlots}</span>
+        <span class="kpi-lbl">ช่องทั้งหมด</span>
+      </div>
+      <div class="summary-kpi kpi-filled">
+        <span class="kpi-val">${filledSlots}</span>
+        <span class="kpi-lbl">จัดแล้ว</span>
+      </div>
+      <div class="summary-kpi ${emptySlots > 0 ? "kpi-empty" : "kpi-ok"}">
+        <span class="kpi-val">${emptySlots}</span>
+        <span class="kpi-lbl">ยังว่าง</span>
+      </div>
+      <div class="summary-kpi kpi-rate">
+        <span class="kpi-val">${fillRate}%</span>
+        <span class="kpi-lbl">จัดได้</span>
+      </div>
+    </div>
+    <div class="summary-fill-track"><div class="summary-fill-bar ${fillRate < 80 ? "fill-warn" : fillRate < 100 ? "fill-ok" : "fill-full"}" style="width:${fillRate}%"></div></div>
+    <div class="summary-meta" style="margin-top:.75rem">
+      <span>สูงสุด: <strong>${maxC} เวร</strong></span>
+      <span>ต่ำสุด: <strong>${minC} เวร</strong></span>
+      <span class="${spread <= 1 ? "spread-good" : spread <= 2 ? "spread-ok" : "spread-warn"}">ต่างกัน: <strong>${spread} เวร</strong></span>
+    </div>
+    <div class="summary-bars" style="margin-top:.5rem">
+      ${sortedStaff.map(([name, cnt]) => {
+        const pct = maxC > 0 ? Math.round((cnt / maxC) * 100) : 0;
+        return `<div class="summary-bar-row">
+          <span class="summary-name">${escapeHtml(name)}</span>
+          <div class="summary-bar-track"><div class="summary-bar-fill" style="width:${pct}%"></div></div>
+          <span class="summary-count">${cnt}</span>
+        </div>`;
+      }).join("")}
+    </div>`;
+
+  // ── Tab 2: รายกะ ───────────────────────────────────────────────
+  const shiftPosRows = Object.values(byShiftPos)
+    .sort((a, b) => a.shift.localeCompare(b.shift, "th") || a.pos.localeCompare(b.pos, "th"));
+  const byShiftRowsHtml = shiftPosRows.map((row) => {
+    const tot = row.filled + row.empty;
+    const pct = tot > 0 ? Math.round((row.filled / tot) * 100) : 0;
+    const cls = pct < 80 ? "td-warn" : pct < 100 ? "td-ok" : "td-filled";
+    return `<tr>
+      <td>${escapeHtml(row.shift)}</td>
+      <td class="td-pos">${escapeHtml(row.pos || "—")}</td>
+      <td class="td-num td-filled">${row.filled}</td>
+      <td class="td-num ${row.empty > 0 ? "td-empty" : "td-ok"}">${row.empty}</td>
+      <td class="td-num td-total">${tot}</td>
+      <td class="td-pct-cell">
+        <div class="td-pct-bar-wrap"><div class="td-pct-bar ${cls}" style="width:${pct}%"></div></div>
+        <span class="td-pct-label ${cls}">${pct}%</span>
+      </td>
+    </tr>`;
+  }).join("");
+  const byShiftHtml = `
+    <div class="summary-table-wrap">
+      <table class="summary-table">
+        <thead><tr><th>กะ</th><th>ตำแหน่ง</th><th>จัดแล้ว</th><th>ว่าง</th><th>รวม</th><th style="min-width:100px">จัดได้</th></tr></thead>
+        <tbody>${byShiftRowsHtml}</tbody>
+      </table>
+    </div>`;
+
+  // ── Tab 3: รายคน ──────────────────────────────────────────────
+  const byPersonHeader = shiftColumns
+    .map((shiftName) => `<th class="td-matrix-shift">${escapeHtml(shiftName)}</th>`)
+    .join("");
+  const byPersonRows = sortedStaff.map(([name, total]) => {
+    const shiftMap = byStaffShift[name] || {};
+    const cells = shiftColumns.map((shiftName) => {
+      const value = shiftMap[shiftName] || 0;
+      return `<td class="td-num ${value > 0 ? "td-filled" : "td-zero"}">${value}</td>`;
+    }).join("");
+    return `<tr>
+      <td class="td-name">${escapeHtml(name)}</td>
+      ${cells}
+      <td class="td-num td-total">${total}</td>
+    </tr>`;
+  }).join("");
+  const byPersonFooter = shiftColumns
+    .map((shiftName) => `<td class="td-num td-total">${totalByShift[shiftName] || 0}</td>`)
+    .join("");
+  const byPersonHtml = `
+    <div class="summary-table-wrap">
+      <table class="summary-table summary-table-matrix">
+        <thead>
+          <tr><th>ชื่อ</th>${byPersonHeader}<th>รวม</th></tr>
+        </thead>
+        <tbody>
+          ${byPersonRows}
+        </tbody>
+        <tfoot>
+          <tr><td class="td-name">รวม</td>${byPersonFooter}<td class="td-num td-filled">${filledSlots}</td></tr>
+        </tfoot>
+      </table>
+    </div>`;
 
   const div = document.createElement("div");
   div.id = "schedule_summary";
   div.className = "schedule-summary";
-  div.innerHTML =
-    `<h3 class="summary-title">สรุปเวรต่อคน</h3>` +
-    `<div class="summary-meta">` +
-    `<span>เวรสูงสุด: <strong>${maxC}</strong></span>` +
-    `<span>เวรต่ำสุด: <strong>${minC}</strong></span>` +
-    `<span class="${spread <= 1 ? "spread-good" : spread <= 2 ? "spread-ok" : "spread-warn"}">ต่าง: <strong>${spread}</strong></span>` +
-    (dummyCount > 0 ? `<span class="spread-warn">ว่าง: <strong>${dummyCount}</strong></span>` : "") +
-    `</div>` +
-    `<div class="summary-bars">` +
-    sorted.map(([name, cnt]) => {
-      const pct = maxC > 0 ? Math.round((cnt / maxC) * 100) : 0;
-      return `<div class="summary-bar-row"><span class="summary-name">${escapeHtml(name)}</span><div class="summary-bar-track"><div class="summary-bar-fill" style="width:${pct}%"></div></div><span class="summary-count">${cnt}</span></div>`;
-    }).join("") +
-    `</div>`;
+  div.innerHTML = `
+    <div class="summary-tab-bar">
+      <button class="summary-tab active" data-stab="overview">ภาพรวม</button>
+      <button class="summary-tab" data-stab="by-shift">รายกะ</button>
+      <button class="summary-tab" data-stab="by-person">รายคน</button>
+    </div>
+    <div class="summary-panel" data-spanel="overview">${overviewHtml}</div>
+    <div class="summary-panel" data-spanel="by-shift" hidden>${byShiftHtml}</div>
+    <div class="summary-panel" data-spanel="by-person" hidden>${byPersonHtml}</div>`;
+
   wrap.after(div);
+
+  div.querySelectorAll(".summary-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tab = btn.dataset.stab;
+      div.querySelectorAll(".summary-tab").forEach((b) => b.classList.toggle("active", b.dataset.stab === tab));
+      div.querySelectorAll(".summary-panel").forEach((p) => {
+        if (p.dataset.spanel === tab) p.removeAttribute("hidden");
+        else p.setAttribute("hidden", "");
+      });
+    });
+  });
 }
 
-async function handleDummyClick(span, staffList, runId, busyByDay, startDate) {
+async function handleDummyClick(span, staffList, runId, busyByDay, busyByDayInfo, prevDayInfo, nextDayInfo, startDate) {
   if (span.dataset.loading) return;
   const day = parseInt(span.dataset.day, 10);
   const shiftName = span.dataset.shift;
   const position = span.dataset.pos;
   const slotIndex = parseInt(span.dataset.slot, 10);
+
+  // รองรับ "สลับไปช่องว่าง": ถ้ามี swap ค้างอยู่แล้วคลิกช่องว่าง ให้ swap ทันที
+  if (_swapPending) {
+    const src = _swapPending;
+    _clearSwapPending();
+    span.dataset.loading = "1";
+    try {
+      const r = await fetch(`${API}/schedule/${src.runId}/swap`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          day_a: src.day,
+          shift_name_a: src.shiftName,
+          position_a: src.position,
+          slot_index_a: src.slotIndex,
+          day_b: day,
+          shift_name_b: shiftName,
+          position_b: position,
+          slot_index_b: slotIndex,
+        }),
+      });
+      const rj = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(rj.detail || "swap failed");
+      _lastSwap = {
+        runId: src.runId,
+        name_a: src.staffName,
+        name_b: "ว่าง",
+        day_a: src.day,
+        shift_a: src.shiftName,
+        pos_a: src.position,
+        slot_a: src.slotIndex,
+        day_b: day,
+        shift_b: shiftName,
+        pos_b: position,
+        slot_b: slotIndex,
+      };
+      if (rj.warnings && rj.warnings.length) alert("⚠️ คำเตือน:\n" + rj.warnings.join("\n"));
+      await refreshSchedule();
+      _showUndoSwapBanner();
+    } catch (e) {
+      delete span.dataset.loading;
+      alert("สลับไม่สำเร็จ: " + e.message);
+    }
+    return;
+  }
 
   if (!staffList || staffList.length === 0) {
     alert("ไม่มีบุคลากรในระบบ — ไปที่หน้าบุคลากรเพื่อเพิ่มก่อน");
@@ -1016,6 +1781,7 @@ async function handleDummyClick(span, staffList, runId, busyByDay, startDate) {
   const posInfo = shift && shift.positions ? shift.positions.find((p) => p.name === position) : null;
   const requiredSkill = posInfo && posInfo.required_skill ? (posInfo.required_skill || "").trim() : "";
   const minSkillLevel = posInfo && posInfo.min_skill_level ? parseInt(posInfo.min_skill_level, 10) || 0 : 0;
+  const positionTimeWindowName = posInfo && posInfo.time_window_name ? (posInfo.time_window_name || "").trim() : "";
 
   const canWorkPosition = (mt) => {
     if (!requiredSkill) return true;
@@ -1027,18 +1793,28 @@ async function handleDummyClick(span, staffList, runId, busyByDay, startDate) {
   };
 
   const busy = busyByDay && busyByDay[day] ? busyByDay[day] : new Set();
+  const busyInfo = busyByDayInfo && busyByDayInfo[day] ? busyByDayInfo[day] : {};
+  const prevInfo = prevDayInfo && prevDayInfo[day] ? prevDayInfo[day] : {};
+  const nextInfo = nextDayInfo && nextDayInfo[day] ? nextDayInfo[day] : {};
   staffList.forEach((mt) => {
     const opt = document.createElement("option");
     opt.value = mt.name;
     const isBusy = busy.has(mt.name);
+    const assignedShifts = isBusy && busyInfo[mt.name] ? Array.from(busyInfo[mt.name]).filter(Boolean) : [];
+    const prevAssignedShifts = prevInfo[mt.name] ? Array.from(prevInfo[mt.name]).filter(Boolean) : [];
+    const nextAssignedShifts = nextInfo[mt.name] ? Array.from(nextInfo[mt.name]).filter(Boolean) : [];
     const hasSkill = canWorkPosition(mt);
+    const hasTimeWindow = _canWorkPositionTimeWindow(mt, day, positionTimeWindowName, startDate);
     const isOff = _isStaffOffOnDay(mt, day, startDate);
+    const canDouble = isBusy ? canTakeSecondShift(assignedShifts, shiftName) : true;
     let label = mt.name;
-    if (isBusy) label += " (มีเวรแล้ว)";
-    else if (!hasSkill && requiredSkill) label += " (ไม่มีทักษะ)";
-    if (isOff) label += " (off)";
+    label += _buildPreviousDayShiftLabel(prevAssignedShifts);
+    label += _buildStaffDayStatusLabel(isBusy, assignedShifts, canDouble, isOff);
+    label += _buildNextDayShiftLabel(nextAssignedShifts);
+    if (!isBusy && !hasSkill && requiredSkill) label += " (ไม่มีทักษะ)";
+    if (!hasTimeWindow && positionTimeWindowName) label += ` (ไม่อยู่ช่วงเวลา ${positionTimeWindowName})`;
     opt.textContent = label;
-    if (isBusy || (!hasSkill && requiredSkill)) opt.disabled = true;
+    if ((isBusy && !canDouble) || (!hasSkill && requiredSkill) || !hasTimeWindow || isOff) opt.disabled = true;
     select.appendChild(opt);
   });
 
@@ -1049,7 +1825,7 @@ async function handleDummyClick(span, staffList, runId, busyByDay, startDate) {
     ns.textContent = "ว่าง";
     Object.assign(ns.dataset, { run: runId, day, shift: shiftName, pos: position, slot: slotIndex });
     select.replaceWith(ns);
-    ns.addEventListener("click", () => handleDummyClick(ns, staffList, runId, busyByDay, startDate));
+    ns.addEventListener("click", () => handleDummyClick(ns, staffList, runId, busyByDay, busyByDayInfo, prevDayInfo, nextDayInfo, startDate));
   };
 
   span.replaceWith(select);
@@ -1077,7 +1853,7 @@ async function handleDummyClick(span, staffList, runId, busyByDay, startDate) {
   select.addEventListener("blur", () => { if (!select.value) restoreSpan(); });
 }
 
-async function handleNameClick(span, staffList, runId, busyByDay, startDate) {
+async function handleNameClick(span, staffList, runId, busyByDay, busyByDayInfo, prevDayInfo, nextDayInfo, startDate) {
   if (span.dataset.loading) return;
   const day = parseInt(span.dataset.day, 10);
   const shiftName = span.dataset.shift;
@@ -1123,10 +1899,10 @@ async function handleNameClick(span, staffList, runId, busyByDay, startDate) {
     return;
   }
 
-  _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, position, slotIndex, currentName, startDate);
+  _openNameDropdown(span, staffList, runId, busyByDay, busyByDayInfo, prevDayInfo, nextDayInfo, day, shiftName, position, slotIndex, currentName, startDate);
 }
 
-function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, position, slotIndex, currentName, startDate) {
+function _openNameDropdown(span, staffList, runId, busyByDay, busyByDayInfo, prevDayInfo, nextDayInfo, day, shiftName, position, slotIndex, currentName, startDate) {
   const wrap = document.createElement("span");
   wrap.className = "name-edit-wrap";
 
@@ -1141,6 +1917,7 @@ function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, po
   const posInfo = shift && shift.positions ? shift.positions.find((p) => p.name === position) : null;
   const requiredSkill = posInfo && posInfo.required_skill ? (posInfo.required_skill || "").trim() : "";
   const minSkillLevel = posInfo && posInfo.min_skill_level ? parseInt(posInfo.min_skill_level, 10) || 0 : 0;
+  const positionTimeWindowName = posInfo && posInfo.time_window_name ? (posInfo.time_window_name || "").trim() : "";
 
   const canWorkPosition = (mt) => {
     if (!requiredSkill) return true;
@@ -1152,21 +1929,33 @@ function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, po
   };
 
   const busy = new Set(busyByDay && busyByDay[day] ? [...busyByDay[day]] : []);
+  const busyInfo = busyByDayInfo && busyByDayInfo[day] ? busyByDayInfo[day] : {};
+  const prevInfo = prevDayInfo && prevDayInfo[day] ? prevDayInfo[day] : {};
+  const nextInfo = nextDayInfo && nextDayInfo[day] ? nextDayInfo[day] : {};
   busy.delete(currentName);
 
   staffList.forEach((mt) => {
     const opt = document.createElement("option");
     opt.value = mt.name;
     const isBusy = busy.has(mt.name);
+    const assignedShifts = isBusy && busyInfo[mt.name] ? Array.from(busyInfo[mt.name]).filter(Boolean) : [];
+    const prevAssignedShifts = prevInfo[mt.name] ? Array.from(prevInfo[mt.name]).filter(Boolean) : [];
+    const nextAssignedShifts = nextInfo[mt.name] ? Array.from(nextInfo[mt.name]).filter(Boolean) : [];
     const hasSkill = canWorkPosition(mt);
+    const hasTimeWindow = _canWorkPositionTimeWindow(mt, day, positionTimeWindowName, startDate);
     const isOff = _isStaffOffOnDay(mt, day, startDate);
+    const canDouble = isBusy ? canTakeSecondShift(assignedShifts, shiftName) : true;
     let label = mt.name;
-    if (isBusy && mt.name !== currentName) label += " (มีเวรแล้ว)";
-    else if (!hasSkill && requiredSkill) label += " (ไม่มีทักษะ)";
-    if (isOff) label += " (off)";
+    label += _buildPreviousDayShiftLabel(prevAssignedShifts);
+    label += mt.name !== currentName
+      ? _buildStaffDayStatusLabel(isBusy, assignedShifts, canDouble, isOff)
+      : (isOff ? " [วันนี้: off]" : " [วันนี้: ช่องนี้]");
+    label += _buildNextDayShiftLabel(nextAssignedShifts);
+    if ((!isBusy || mt.name === currentName) && !hasSkill && requiredSkill) label += " (ไม่มีทักษะ)";
+    if ((!isBusy || mt.name === currentName) && !hasTimeWindow && positionTimeWindowName) label += ` (ไม่อยู่ช่วงเวลา ${positionTimeWindowName})`;
     opt.textContent = label;
     if (mt.name === currentName) opt.selected = true;
-    if (isBusy || (!hasSkill && requiredSkill)) opt.disabled = true;
+    if (((isBusy && !canDouble) || (!hasSkill && requiredSkill) || !hasTimeWindow || isOff) && mt.name !== currentName) opt.disabled = true;
     select.appendChild(opt);
   });
 
@@ -1183,7 +1972,7 @@ function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, po
     ns.textContent = currentName;
     Object.assign(ns.dataset, { run: runId, day, shift: shiftName, pos: position, slot: slotIndex, name: currentName });
     wrap.replaceWith(ns);
-    ns.addEventListener("click", () => handleNameClick(ns, staffList, runId, busyByDay, startDate));
+    ns.addEventListener("click", () => handleNameClick(ns, staffList, runId, busyByDay, busyByDayInfo, prevDayInfo, nextDayInfo, startDate));
   };
 
   wrap.appendChild(select);
@@ -1199,7 +1988,7 @@ function _openNameDropdown(span, staffList, runId, busyByDay, day, shiftName, po
     ns.title = "รอสลับ — คลิกชื่ออื่น หรือ Esc เพื่อยกเลิก";
     ns.textContent = currentName;
     Object.assign(ns.dataset, { run: runId, day, shift: shiftName, pos: position, slot: slotIndex, name: currentName });
-    ns.addEventListener("click", () => handleNameClick(ns, staffList, runId, busyByDay, startDate));
+    ns.addEventListener("click", () => handleNameClick(ns, staffList, runId, busyByDay, busyByDayInfo, prevDayInfo, nextDayInfo, startDate));
     wrap.replaceWith(ns);
     _swapPending = { span: ns, runId, day, shiftName, position, slotIndex, staffName: currentName };
   });
@@ -1245,6 +2034,8 @@ async function refreshShifts() {
   refreshPairShiftsSelect();
   const addGapRules = document.getElementById("staff_add_min_gap_rules");
   if (addGapRules) renderMinGapRulesInputs(addGapRules, []);
+  const addMinByShift = document.getElementById("staff_add_min_shifts_by_shift");
+  if (addMinByShift) renderMinShiftsByShiftInputs(addMinByShift, {});
   lastCounts.shifts = list.length;
   updateNavBadges();
   updateHomeProcessSteps();
@@ -1462,6 +2253,31 @@ async function refreshTitles() {
   window.titlesCatalog = Array.isArray(list) ? list : [];
   renderTitleList(list);
   await refreshStaffTitleSelect();
+  fillShiftMinRequiredTitleSelect(list);
+}
+
+function fillShiftMinRequiredTitleSelect(titles) {
+  const sel = document.getElementById("shift_min_required_title");
+  if (!sel) return;
+  const current = sel.value || "";
+  const list = Array.isArray(titles) ? titles : [];
+  sel.innerHTML = '<option value="">ไม่บังคับ</option>' + list
+    .map((t) => '<option value="' + escapeHtml(t.name) + '">' + escapeHtml(t.name) + ' (' + (t.type === "parttime" ? "พาร์ทไทม์" : "เต็มเวลา") + ')</option>')
+    .join("");
+  if (current && list.some((t) => t.name === current)) {
+    sel.value = current;
+  } else {
+    sel.value = "";
+  }
+}
+
+const _shiftMinTitleSel = document.getElementById("shift_min_required_title");
+if (_shiftMinTitleSel) {
+  _shiftMinTitleSel.addEventListener("change", () => {
+    const cnt = document.getElementById("shift_min_required_count");
+    if (!cnt) return;
+    if (!(_shiftMinTitleSel.value || "").trim()) cnt.value = "0";
+  });
 }
 
 function fillStaffTitleSelect(titles) {
@@ -1568,6 +2384,7 @@ async function refreshSettings() {
   loadHolidaysFromString(s.holiday_dates || "");
   syncHolidayHidden();
   renderHolidayCalendar();
+  refreshPositionDateSelectors();
 }
 
 async function refreshSchedule() {
@@ -1577,6 +2394,19 @@ async function refreshSchedule() {
   } catch {
     renderSchedule(null, []);
   }
+}
+
+const exportCsvBtn = document.getElementById("export_csv");
+if (exportCsvBtn) {
+  exportCsvBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    const data = _lastRenderedSchedule || await loadLatestSchedule().catch(() => null);
+    if (!data) {
+      alert("ยังไม่มีตารางให้ดาวน์โหลด");
+      return;
+    }
+    downloadScheduleTableCsv(data);
+  });
 }
 
 function fillPresetYear() {
@@ -1675,7 +2505,7 @@ document.getElementById("add_staff").addEventListener("click", async () => {
     const r = await fetch(API + "/staff", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, title, off_days, off_days_of_month, skills, time_windows, min_shifts_per_month, max_shifts_per_month, min_gap_days, min_gap_shifts: [], min_gap_rules }),
+      body: JSON.stringify({ name, title, off_days, off_days_of_month, skills, time_windows, min_shifts_per_month, max_shifts_per_month, min_gap_days, min_gap_shifts: [], min_gap_rules, day_shift_overrides: collectDayOverrides(), min_shifts_by_shift: collectMinShiftsByShift('#staff_add_min_shifts_by_shift') }),
     });
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
@@ -1693,6 +2523,7 @@ document.getElementById("add_staff").addEventListener("click", async () => {
   if (minShiftsEl) minShiftsEl.value = "";
   if (maxShiftsEl) maxShiftsEl.value = "";
   document.querySelectorAll("#staff_add_min_gap_rules .min-gap-rule-input").forEach((el) => { el.value = ""; });
+  document.querySelectorAll("#staff_add_min_shifts_by_shift .min-shifts-by-shift-input").forEach((el) => { el.value = ""; });
   document.querySelectorAll("#staff_add_time_windows input[type=checkbox]").forEach((cb) => { cb.checked = false; });
   await refreshStaff();
 });
@@ -1781,17 +2612,24 @@ document.getElementById("add_time_window").addEventListener("click", async () =>
   }
 });
 
-function addPositionRow(name = "", note = "", slotCount = 1, timeWindowName = "", requiredSkill = "", minSkillLevel = 0, allowedTitles = [], maxPerWeek = 0, activeWeekdays = "") {
+function addPositionRow(name = "", note = "", slotCount = 1, timeWindowName = "", requiredSkill = "", minSkillLevel = 0, allowedTitles = [], maxPerWeek = 0, activeWeekdays = "", activeDates = "") {
   const list = document.getElementById("shift_positions_list");
   const posIndex = list.querySelectorAll(".pos-card").length + 1;
   const card = document.createElement("div");
   card.className = "pos-card";
 
-  const hasAdvanced = !!(requiredSkill || minSkillLevel || (allowedTitles && allowedTitles.length) || maxPerWeek || note || activeWeekdays);
+  const hasAdvanced = !!(requiredSkill || minSkillLevel || (allowedTitles && allowedTitles.length) || maxPerWeek || note || activeWeekdays || activeDates);
 
   // --- Header row: badge + name + count + time window + toggle + delete ---
   const header = document.createElement("div");
   header.className = "pos-card-header";
+
+  const dragHandle = document.createElement("button");
+  dragHandle.type = "button";
+  dragHandle.className = "pos-drag-handle";
+  dragHandle.title = "ลากเพื่อสลับลำดับ";
+  dragHandle.textContent = "⋮⋮";
+  dragHandle.draggable = true;
 
   const badge = document.createElement("span");
   badge.className = "pos-badge";
@@ -1837,6 +2675,7 @@ function addPositionRow(name = "", note = "", slotCount = 1, timeWindowName = ""
     renumberPositionBadges();
   });
 
+  header.appendChild(dragHandle);
   header.appendChild(badge);
   header.appendChild(nameIn);
   header.appendChild(countIn);
@@ -1903,19 +2742,25 @@ function addPositionRow(name = "", note = "", slotCount = 1, timeWindowName = ""
   mpwSel.innerHTML = '<option value="0">ไม่จำกัด/wk</option><option value="1">≤1/wk</option><option value="2">≤2/wk</option><option value="3">≤3/wk</option>';
   mpwSel.value = String(maxPerWeek || 0);
 
-  const awWrap = document.createElement("span");
-  awWrap.className = "position-active-weekdays-wrap";
-  awWrap.title = "เปิดเฉพาะวัน (0=จ … 6=อา) เช่น 6 = อาทิตย์เท่านั้น ว่าง = ทุกวันที่กะเปิด";
-  const awLabel = document.createElement("label");
-  awLabel.textContent = "เปิดเฉพาะวัน: ";
+  const awWrap = document.createElement("div");
+  awWrap.className = "position-chip-editor position-active-weekdays-wrap";
+  awWrap.title = "คลิกเลือกวันในสัปดาห์ที่ช่องนี้เปิด";
+  awWrap.innerHTML = '<label class="position-chip-label">เปิดเฉพาะวัน</label><div class="position-chip-list"></div><div class="position-chip-summary"></div>';
   const awIn = document.createElement("input");
-  awIn.type = "text";
+  awIn.type = "hidden";
   awIn.className = "position-active-weekdays";
-  awIn.placeholder = "ว่าง=ทุกวัน หรือ 6 หรือ 5,6";
-  awIn.value = activeWeekdays || "";
-  awIn.style.width = "6rem";
-  awWrap.appendChild(awLabel);
+  awIn.value = formatWeekdayList(parseWeekdayList(activeWeekdays || ""));
   awWrap.appendChild(awIn);
+
+  const adWrap = document.createElement("div");
+  adWrap.className = "position-chip-editor position-active-dates-wrap";
+  adWrap.title = "คลิกเลือกวันที่ของเดือนที่ช่องนี้เปิด";
+  adWrap.innerHTML = '<label class="position-chip-label">เปิดวันที่</label><div class="position-date-chip-list"></div><div class="position-chip-summary"></div>';
+  const adIn = document.createElement("input");
+  adIn.type = "hidden";
+  adIn.className = "position-active-dates";
+  adIn.value = formatDayNumberList(parseOffDaysOfMonth(activeDates || ""));
+  adWrap.appendChild(adIn);
 
   const noteIn = document.createElement("input");
   noteIn.type = "text";
@@ -1923,11 +2768,15 @@ function addPositionRow(name = "", note = "", slotCount = 1, timeWindowName = ""
   noteIn.placeholder = "หมายเหตุ";
   noteIn.value = note;
 
-  adv.appendChild(skillSel);
-  adv.appendChild(lvlSel);
-  adv.appendChild(titlesWrap);
-  adv.appendChild(mpwSel);
+  const topRow = document.createElement("div");
+  topRow.className = "pos-adv-top";
+  topRow.appendChild(skillSel);
+  topRow.appendChild(lvlSel);
+  topRow.appendChild(titlesWrap);
+  topRow.appendChild(mpwSel);
+  adv.appendChild(topRow);
   adv.appendChild(awWrap);
+  adv.appendChild(adWrap);
   adv.appendChild(noteIn);
 
   // Toggle handler
@@ -1940,6 +2789,64 @@ function addPositionRow(name = "", note = "", slotCount = 1, timeWindowName = ""
   card.appendChild(header);
   card.appendChild(adv);
   list.appendChild(card);
+  attachPositionCardDrag(card, dragHandle);
+  renderPositionWeekdaySelector(awIn);
+  renderPositionDateSelector(adIn);
+}
+
+function _clearPositionDragState() {
+  document.querySelectorAll("#shift_positions_list .pos-card").forEach((card) => {
+    card.classList.remove("is-dragging", "drop-before", "drop-after");
+  });
+  _draggedPositionCard = null;
+}
+
+function attachPositionCardDrag(card, dragHandle) {
+  if (!card || !dragHandle) return;
+
+  dragHandle.addEventListener("dragstart", (e) => {
+    _draggedPositionCard = card;
+    card.classList.add("is-dragging");
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", card.querySelector(".position-name")?.value || "");
+    }
+  });
+
+  dragHandle.addEventListener("dragend", () => {
+    renumberPositionBadges();
+    _clearPositionDragState();
+  });
+
+  card.addEventListener("dragover", (e) => {
+    if (!_draggedPositionCard || _draggedPositionCard === card) return;
+    e.preventDefault();
+    const rect = card.getBoundingClientRect();
+    const insertBefore = e.clientY < rect.top + rect.height / 2;
+    card.classList.toggle("drop-before", insertBefore);
+    card.classList.toggle("drop-after", !insertBefore);
+  });
+
+  card.addEventListener("dragleave", () => {
+    if (_draggedPositionCard === card) return;
+    card.classList.remove("drop-before", "drop-after");
+  });
+
+  card.addEventListener("drop", (e) => {
+    if (!_draggedPositionCard || _draggedPositionCard === card) return;
+    e.preventDefault();
+    const list = card.parentElement;
+    if (!list) return;
+    const rect = card.getBoundingClientRect();
+    const insertBefore = e.clientY < rect.top + rect.height / 2;
+    if (insertBefore) {
+      list.insertBefore(_draggedPositionCard, card);
+    } else {
+      list.insertBefore(_draggedPositionCard, card.nextSibling);
+    }
+    renumberPositionBadges();
+    _clearPositionDragState();
+  });
 }
 
 function renumberPositionBadges() {
@@ -1970,7 +2877,9 @@ function collectShiftPositions() {
     const max_per_week = mpwEl ? parseInt(mpwEl.value, 10) || 0 : 0;
     const awEl = card.querySelector(".position-active-weekdays");
     const active_weekdays = (awEl && awEl.value && awEl.value.trim()) || null;
-    if (name) positions.push({ name, constraint_note: note, regular_only: false, slot_count, time_window_name, required_skill, min_skill_level, allowed_titles, max_per_week, active_weekdays });
+    const adEl = card.querySelector(".position-active-dates");
+    const active_dates = (adEl && adEl.value && adEl.value.trim()) || null;
+    if (name) positions.push({ name, constraint_note: note, regular_only: false, slot_count, time_window_name, required_skill, min_skill_level, allowed_titles, max_per_week, active_weekdays, active_dates });
   });
   return positions;
 }
@@ -2027,12 +2936,15 @@ document.getElementById("add_shift").addEventListener("click", async () => {
   }
   let positions = collectShiftPositions();
   if (positions.length === 0) positions = [{ name: "ช่อง 1", constraint_note: "", regular_only: false }];
-  const activeDaysEl = document.getElementById("shift_active_days");
-  const active_days = (activeDaysEl && activeDaysEl.value.trim()) || null;
+  const active_days = _getActiveDaysFromChecks();
   const inclHolEl = document.getElementById("shift_include_holidays");
   const include_holidays = inclHolEl ? inclHolEl.checked : false;
-  const mfEl = document.getElementById("shift_min_fulltime");
-  const min_fulltime = mfEl ? Math.max(0, parseInt(mfEl.value, 10) || 0) : 0;
+  const minTitleEl = document.getElementById("shift_min_required_title");
+  const minCountEl = document.getElementById("shift_min_required_count");
+  const min_required_title = (minTitleEl && minTitleEl.value || "").trim();
+  const min_required_count = min_required_title
+    ? (minCountEl ? Math.max(0, parseInt(minCountEl.value, 10) || 0) : 0)
+    : 0;
   const isEdit = currentShiftId != null;
   const url = isEdit ? API + "/shifts/" + currentShiftId : API + "/shifts";
   const method = isEdit ? "PUT" : "POST";
@@ -2040,7 +2952,15 @@ document.getElementById("add_shift").addEventListener("click", async () => {
     const r = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, positions, active_days, include_holidays, min_fulltime }),
+      body: JSON.stringify({
+        name,
+        positions,
+        active_days,
+        include_holidays,
+        min_fulltime: 0,
+        min_required_title: min_required_title || null,
+        min_required_count,
+      }),
     });
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
@@ -2189,9 +3109,12 @@ document.getElementById("run_schedule").addEventListener("click", async () => {
     if (btn) { btn.disabled = false; btn.classList.remove("is-loading"); if (btnText) btnText.textContent = defaultText; }
     if (data.has_dummy && data.dummy_count > 0) {
       const hints = (data.infeasibility_hints || []).map((h) => "<li>" + escapeHtml(h) + "</li>").join("");
-      msg.innerHTML = `<strong>⚠ สร้างตารางได้บางส่วน — ว่าง ${data.dummy_count} ช่อง</strong> (คนไม่พอหรือมีข้อจำกัด)<br>` +
-        (hints ? `<ul class="reasons-list">${hints}</ul>` : "") +
-        `<br>ไปที่หน้า "ตารางล่าสุด" แล้วคลิก <strong>ว่าง</strong> เพื่อมอบหมายเอง`;
+      const detailsBlock = hints
+        ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:.85rem;color:#856404">ดูสาเหตุที่จัดไม่ครบ ▾</summary><ul class="reasons-list">${hints}</ul></details>`
+        : "";
+      msg.innerHTML = `<strong>⚠ ว่าง ${data.dummy_count} ช่อง</strong> — คนไม่พอหรือมีข้อจำกัด` +
+        detailsBlock +
+        `<div style="margin-top:6px;font-size:.85rem">คลิกช่อง <strong style="color:#e53935">ว่าง</strong> ในตารางเพื่อมอบหมายเอง</div>`;
       msg.className = "message warning";
     } else {
       msg.textContent = "สร้างตารางเรียบร้อย (Run #" + data.run_id + ")";
@@ -2358,13 +3281,36 @@ document.getElementById("save_holidays").addEventListener("click", async () => {
 
 document.getElementById("schedule_start_date").addEventListener("change", () => {
   renderHolidayCalendar();
+  refreshPositionDateSelectors();
 });
+
+const _numDaysInput = document.getElementById("num_days");
+if (_numDaysInput) {
+  _numDaysInput.addEventListener("input", () => {
+    refreshPositionDateSelectors();
+  });
+}
 
 // --- Import / Export ---
 document.getElementById("export_json").addEventListener("click", async () => {
   try {
     const r = await fetch(API + "/export");
-    const data = await r.json();
+    const raw = await r.text();
+    let data = null;
+    try {
+      data = raw ? JSON.parse(raw) : null;
+    } catch {
+      data = null;
+    }
+    if (!r.ok) {
+      const detail = data && data.detail
+        ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail))
+        : (raw || r.statusText || "Export ไม่สำเร็จ");
+      throw new Error(detail);
+    }
+    if (!data || typeof data !== "object") {
+      throw new Error("รูปแบบข้อมูล export ไม่ถูกต้อง");
+    }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

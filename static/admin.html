@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — MT Shift Optimizer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; min-height: 100vh; }
+  .login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .login-box { background: #fff; border-radius: 12px; box-shadow: 0 2px 16px rgba(0,0,0,0.1); padding: 40px; max-width: 380px; width: 100%; text-align: center; }
+  .login-box h1 { font-size: 1.4rem; color: #c62828; margin-bottom: 20px; }
+  .login-box input { width: 100%; padding: 12px 16px; border: 1px solid #ddd; border-radius: 8px; font-size: 1rem; margin-bottom: 10px; outline: none; }
+  .login-box input:focus { border-color: #c62828; }
+  .login-box button { width: 100%; padding: 12px; background: #c62828; color: #fff; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; font-weight: 600; }
+  .login-box button:hover { background: #a31515; }
+  .login-box .err { color: #e53935; font-size: 0.85rem; margin-top: 6px; display: none; }
+
+  .admin-panel { max-width: 700px; margin: 40px auto; padding: 0 20px; }
+  .admin-panel h1 { font-size: 1.4rem; color: #c62828; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; }
+  .admin-panel h1 a { font-size: 0.85rem; color: #999; text-decoration: none; }
+  .ws-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 8px rgba(0,0,0,0.08); }
+  .ws-table th { background: #f5f5f5; padding: 10px 14px; text-align: left; font-size: 0.85rem; color: #666; }
+  .ws-table td { padding: 10px 14px; border-top: 1px solid #eee; font-size: 0.9rem; }
+  .ws-table tr:hover td { background: #fafafa; }
+  .badge { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+  .badge.open { background: #e6f4ea; color: #1e7e34; }
+  .badge.readonly { background: #fff3cd; color: #856404; }
+  .badge.private { background: #f8d7da; color: #721c24; }
+  .btn-del { background: none; border: 1px solid #e53935; color: #e53935; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+  .btn-del:hover { background: #e53935; color: #fff; }
+  .btn-enter { background: none; border: 1px solid #1a73e8; color: #1a73e8; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; text-decoration: none; margin-right: 6px; }
+  .btn-enter:hover { background: #1a73e8; color: #fff; }
+  .empty { color: #999; text-align: center; padding: 30px; }
+</style>
+</head>
+<body>
+
+<div id="loginView" class="login-wrap">
+  <div class="login-box">
+    <h1>Admin Login</h1>
+    <input type="text" id="adminId" placeholder="Admin ID" autocomplete="username">
+    <input type="password" id="adminPw" placeholder="Password" autocomplete="current-password">
+    <button onclick="doLogin()">Login</button>
+    <p class="err" id="loginErr"></p>
+  </div>
+</div>
+
+<div id="panelView" style="display:none" class="admin-panel">
+  <h1>
+    <span>Admin Panel</span>
+    <a href="/">กลับหน้าหลัก</a>
+  </h1>
+  <table class="ws-table">
+    <thead>
+      <tr><th>ชื่อ</th><th>ID</th><th>โหมด</th><th>สร้างเมื่อ</th><th></th></tr>
+    </thead>
+    <tbody id="wsBody"></tbody>
+  </table>
+  <p class="empty" id="emptyMsg" style="display:none">ไม่มี workspace</p>
+</div>
+
+<script>
+let _adminToken = '';
+
+async function doLogin() {
+  const id = document.getElementById('adminId').value.trim();
+  const pw = document.getElementById('adminPw').value.trim();
+  const err = document.getElementById('loginErr');
+  if (!id || !pw) { err.textContent = 'กรอก ID และรหัส'; err.style.display = ''; return; }
+  try {
+    const r = await fetch('/api/admin/login', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id, password: pw})
+    });
+    const data = await r.json();
+    if (!r.ok) { err.textContent = data.detail || 'Login failed'; err.style.display = ''; return; }
+    _adminToken = data.admin_token;
+    sessionStorage.setItem('admin_token', _adminToken);
+    showPanel();
+  } catch { err.textContent = 'เกิดข้อผิดพลาด'; err.style.display = ''; }
+}
+
+function showPanel() {
+  document.getElementById('loginView').style.display = 'none';
+  document.getElementById('panelView').style.display = '';
+  loadWorkspaces();
+}
+
+async function loadWorkspaces() {
+  const r = await fetch('/api/admin/workspaces', {
+    headers: {'X-Admin-Token': _adminToken}
+  });
+  if (r.status === 403) { sessionStorage.removeItem('admin_token'); location.reload(); return; }
+  const list = await r.json();
+  const tbody = document.getElementById('wsBody');
+  tbody.innerHTML = '';
+  if (!list.length) { document.getElementById('emptyMsg').style.display = ''; return; }
+  document.getElementById('emptyMsg').style.display = 'none';
+
+  const modeLabels = {open: 'เปิด', readonly: 'ดูอย่างเดียว', private: 'ส่วนตัว'};
+  for (const ws of list) {
+    const tr = document.createElement('tr');
+    const mode = ws.access_mode || 'open';
+    const name = ws.name || ('Workspace ' + ws.id);
+    const date = ws.created_at ? new Date(ws.created_at + 'Z').toLocaleDateString('th-TH') : '';
+    const href = '/w/' + ws.id + '/#t=' + encodeURIComponent(ws.token || '');
+    tr.innerHTML =
+      '<td>' + esc(name) + '</td>' +
+      '<td style="font-family:monospace;font-size:0.8rem">' + ws.id + '</td>' +
+      '<td><span class="badge ' + mode + '">' + esc(modeLabels[mode] || mode) + '</span></td>' +
+      '<td style="font-size:0.8rem">' + date + '</td>' +
+      '<td style="white-space:nowrap">' +
+        '<a href="' + href + '" class="btn-enter">เข้า</a>' +
+        '<button class="btn-del" onclick="delWs(\'' + ws.id + '\', \'' + esc(name) + '\')">ลบ</button>' +
+      '</td>';
+    tbody.appendChild(tr);
+  }
+}
+
+async function delWs(id, name) {
+  if (!confirm('ลบ workspace "' + name + '" ?\nข้อมูลทั้งหมดจะหายถาวร')) return;
+  await fetch('/api/admin/workspaces/' + id, {
+    method: 'DELETE', headers: {'X-Admin-Token': _adminToken}
+  });
+  loadWorkspaces();
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// Auto-login from session
+document.getElementById('adminPw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+const saved = sessionStorage.getItem('admin_token');
+if (saved) { _adminToken = saved; showPanel(); }
+</script>
+</body>
+</html>

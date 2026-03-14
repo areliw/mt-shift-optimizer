@@ -13,20 +13,21 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 20px;
   }
   .container {
     background: #fff;
     border-radius: 12px;
     box-shadow: 0 2px 16px rgba(0,0,0,0.1);
     padding: 40px;
-    max-width: 480px;
+    max-width: 520px;
     width: 100%;
     text-align: center;
   }
   h1 { font-size: 1.6rem; color: #1a73e8; margin-bottom: 8px; }
   .subtitle { color: #666; margin-bottom: 28px; font-size: 0.95rem; }
   .create-section { margin-bottom: 28px; }
-  .create-section input {
+  .create-section input[type="text"] {
     width: 100%;
     padding: 12px 16px;
     border: 1px solid #ddd;
@@ -35,7 +36,19 @@
     margin-bottom: 12px;
     outline: none;
   }
-  .create-section input:focus { border-color: #1a73e8; }
+  .create-section input[type="text"]:focus { border-color: #1a73e8; }
+  .mode-selector {
+    display: flex; gap: 8px; margin-bottom: 14px; text-align: left;
+  }
+  .mode-option {
+    flex: 1; padding: 10px 8px; border: 2px solid #e8e8e8; border-radius: 8px;
+    cursor: pointer; text-align: center; transition: all 0.15s; background: #fff;
+  }
+  .mode-option:hover { border-color: #90b4f8; }
+  .mode-option.active { border-color: #1a73e8; background: #e8f0fe; }
+  .mode-option .mode-icon { font-size: 1.3rem; margin-bottom: 4px; }
+  .mode-option .mode-label { font-size: 0.78rem; font-weight: 600; color: #333; }
+  .mode-option .mode-desc { font-size: 0.68rem; color: #888; margin-top: 2px; }
   .btn-primary {
     width: 100%;
     padding: 12px;
@@ -50,36 +63,32 @@
   .btn-primary:hover { background: #1557b0; }
   .btn-primary:disabled { background: #aaa; cursor: not-allowed; }
   .divider {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin: 24px 0;
-    color: #999;
-    font-size: 0.85rem;
+    display: flex; align-items: center; gap: 12px; margin: 24px 0;
+    color: #999; font-size: 0.85rem;
   }
   .divider::before, .divider::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: #ddd;
+    content: ''; flex: 1; height: 1px; background: #ddd;
   }
   .workspace-list { text-align: left; }
   .workspace-list h3 { font-size: 0.95rem; color: #333; margin-bottom: 12px; }
   .ws-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 14px;
-    border: 1px solid #e8e8e8;
-    border-radius: 8px;
-    margin-bottom: 8px;
-    text-decoration: none;
-    color: #333;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border: 1px solid #e8e8e8; border-radius: 8px;
+    margin-bottom: 8px; text-decoration: none; color: #333;
     transition: background 0.15s;
   }
   .ws-item:hover { background: #f5f8ff; border-color: #1a73e8; }
+  .ws-item.is-private { opacity: 0.7; }
   .ws-name { font-weight: 500; }
+  .ws-meta { display: flex; align-items: center; gap: 8px; }
   .ws-date { font-size: 0.8rem; color: #999; }
+  .ws-badge {
+    font-size: 0.65rem; padding: 2px 6px; border-radius: 4px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .ws-badge.open { background: #e6f4ea; color: #1e7e34; }
+  .ws-badge.readonly { background: #fff3cd; color: #856404; }
+  .ws-badge.private { background: #f8d7da; color: #721c24; }
   .ws-arrow { color: #1a73e8; font-size: 1.2rem; }
   .ws-delete {
     background: none; border: none; color: #ccc; cursor: pointer;
@@ -87,23 +96,54 @@
   }
   .ws-delete:hover { color: #e53935; }
   .ws-right { display: flex; align-items: center; gap: 4px; }
+  .ws-copy {
+    background: none; border: 1px solid #1a73e8; color: #1a73e8; cursor: pointer;
+    font-size: 0.72rem; padding: 3px 8px; border-radius: 6px;
+  }
+  .ws-copy:hover { background: #1a73e8; color: #fff; }
   .empty-msg { color: #999; font-size: 0.9rem; padding: 12px 0; }
+  .ws-lock-icon { color: #999; font-size: 0.9rem; margin-right: 4px; }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>MT Shift Optimizer</h1>
-  <p class="subtitle">ระบบจัดเวรอัตโนมัติ สำหรับแผนก MT<br><small style="font-size:0.82rem;color:#999">ทุกคนจะเห็น workspace ของคุณ แต่จะไม่เห็นเนื้อหาข้างใน</small></p>
+  <p class="subtitle">ระบบจัดเวรอัตโนมัติ สำหรับแผนก MT</p>
 
   <div class="create-section">
     <input type="text" id="wsName" placeholder="ชื่อ workspace (เช่น รพ.ของฉัน)" maxlength="100">
+    <div class="mode-selector" id="modeSelector">
+      <div class="mode-option active" data-mode="open" onclick="selectMode('open')">
+        <div class="mode-icon">&#127760;</div>
+        <div class="mode-label">เปิดทั้งหมด</div>
+        <div class="mode-desc">ใครก็ดู+แก้ได้</div>
+      </div>
+      <div class="mode-option" data-mode="readonly" onclick="selectMode('readonly')">
+        <div class="mode-icon">&#128065;</div>
+        <div class="mode-label">ดูอย่างเดียว</div>
+        <div class="mode-desc">ดูได้ แก้ต้องใส่รหัส</div>
+      </div>
+      <div class="mode-option" data-mode="private" onclick="selectMode('private')">
+        <div class="mode-icon">&#128274;</div>
+        <div class="mode-label">ส่วนตัว</div>
+        <div class="mode-desc">ต้องมีรหัสถึงเข้าได้</div>
+      </div>
+    </div>
+    <div id="passwordSection" style="display:none;margin-bottom:12px">
+      <input type="password" id="wsPassword" placeholder="ตั้งรหัสสำหรับแก้ไข" style="width:100%;padding:12px 16px;border:1px solid #ddd;border-radius:8px;font-size:1rem;outline:none;" autocomplete="new-password">
+      <div style="font-size:0.75rem;color:#999;margin-top:4px;text-align:left">รหัสนี้ใช้สำหรับเจ้าของ/คนที่จะแก้ไข — จำไว้ให้ดี</div>
+    </div>
     <button class="btn-primary" id="btnCreate" onclick="createWorkspace()">สร้าง Workspace ใหม่</button>
   </div>
 
-  <div class="divider">หรือเลือก workspace ที่มีอยู่</div>
+  <div class="divider">Workspace ทั้งหมดในระบบ</div>
 
   <div class="workspace-list" id="wsList">
     <p class="empty-msg">กำลังโหลด...</p>
+  </div>
+
+  <div style="margin-top:20px;text-align:center;font-size:0.8rem;color:#999">
+    <a href="mailto:areliw11111@gmail.com" style="color:#1a73e8;text-decoration:none">&#9993; รายงานบั๊ค / ติดต่อ Support</a>
   </div>
 </div>
 
@@ -111,6 +151,26 @@
 // ws_tokens: { workspaceId: token, ... } stored per browser
 function _getTokens() { try { return JSON.parse(localStorage.getItem('ws_tokens') || '{}'); } catch { return {}; } }
 function _saveTokens(t) { localStorage.setItem('ws_tokens', JSON.stringify(t)); }
+// track ว่า workspace ไหนสร้างจากเครื่องนี้ (ไม่เก็บ token, แค่ id)
+function _getMyIds() { try { return JSON.parse(localStorage.getItem('ws_my_ids') || '[]'); } catch { return []; } }
+function _addMyId(id) { const ids = new Set(_getMyIds()); ids.add(id); localStorage.setItem('ws_my_ids', JSON.stringify([...ids])); }
+function _removeMyId(id) { const ids = new Set(_getMyIds()); ids.delete(id); localStorage.setItem('ws_my_ids', JSON.stringify([...ids])); }
+
+let _selectedMode = 'open';
+
+function selectMode(mode) {
+  _selectedMode = mode;
+  document.querySelectorAll('.mode-option').forEach(el => {
+    el.classList.toggle('active', el.dataset.mode === mode);
+  });
+  document.getElementById('passwordSection').style.display = (mode === 'open') ? 'none' : '';
+}
+
+const MODE_LABELS = {
+  open: 'เปิด',
+  readonly: 'ดูอย่างเดียว',
+  private: 'ส่วนตัว',
+};
 
 async function loadWorkspaces() {
   try {
@@ -127,59 +187,132 @@ async function loadWorkspaces() {
     }
     _saveTokens(tokens);
 
-    // แสดงเฉพาะ workspace ที่เครื่องนี้มี token
-    const mine = list.filter(ws => tokens[ws.id]);
     const el = document.getElementById('wsList');
-    if (!mine.length) {
-      el.innerHTML = '<p class="empty-msg">ยังไม่มี workspace ในเครื่องนี้ — สร้างใหม่ได้เลย</p>';
+    if (!list.length) {
+      el.innerHTML = '<p class="empty-msg">ยังไม่มี workspace — สร้างใหม่ได้เลย</p>';
       return;
     }
-    el.innerHTML = '<h3>Workspace ของเครื่องนี้</h3>';
-    for (const ws of mine) {
-      const name = ws.name || ('Workspace ' + ws.id);
-      const date = ws.created_at ? new Date(ws.created_at + 'Z').toLocaleDateString('th-TH') : '';
-      const tok = tokens[ws.id] || '';
-      // ใส่ token ใน hash เพื่อให้หน้า workspace อ่านได้ถ้า localStorage หาย
-      const href = '/w/' + ws.id + '/#t=' + encodeURIComponent(tok);
-      const item = document.createElement('div');
-      item.className = 'ws-item';
-      const link = document.createElement('a');
-      link.href = href;
-      link.style.cssText = 'text-decoration:none;color:inherit;flex:1';
-      link.innerHTML = '<div class="ws-name">' + escHtml(name) + '</div><div class="ws-date">' + date + '</div>';
-      const right = document.createElement('div');
-      right.className = 'ws-right';
-      const arrow = document.createElement('a');
-      arrow.href = href;
-      arrow.className = 'ws-arrow';
-      arrow.style.cssText = 'text-decoration:none';
-      arrow.innerHTML = '&rarr;';
-      right.appendChild(arrow);
-      item.appendChild(link);
-      item.appendChild(right);
-      el.appendChild(item);
+
+    // แยก: ของฉัน (มี token หรือ myIds) vs ของคนอื่น
+    const myIds = new Set(_getMyIds());
+    const mine = list.filter(ws => tokens[ws.id] || myIds.has(ws.id));
+    const others = list.filter(ws => !tokens[ws.id] && !myIds.has(ws.id));
+
+    el.innerHTML = '';
+
+    if (mine.length) {
+      const h = document.createElement('h3');
+      h.textContent = 'Workspace ของฉัน';
+      el.appendChild(h);
+      mine.forEach(ws => el.appendChild(renderWsItem(ws, tokens, true)));
+    }
+
+    if (others.length) {
+      const h = document.createElement('h3');
+      h.textContent = 'Workspace อื่นๆ';
+      h.style.marginTop = mine.length ? '16px' : '0';
+      el.appendChild(h);
+      others.forEach(ws => el.appendChild(renderWsItem(ws, tokens, false)));
     }
   } catch(e) {
     document.getElementById('wsList').innerHTML = '<p class="empty-msg">โหลดไม่สำเร็จ</p>';
   }
 }
 
+function renderWsItem(ws, tokens, isMine) {
+  const name = ws.name || ('Workspace ' + ws.id);
+  const date = ws.created_at ? new Date(ws.created_at + 'Z').toLocaleDateString('th-TH') : '';
+  const tok = tokens[ws.id] || '';
+  const mode = ws.access_mode || 'open';
+  const isPrivate = mode === 'private' && !isMine;
+
+  const item = document.createElement('div');
+  item.className = 'ws-item' + (isPrivate ? ' is-private' : '');
+
+  if (isPrivate) {
+    // private + ไม่ใช่เจ้าของ → แสดงชื่อแต่คลิกไม่ได้
+    item.innerHTML =
+      '<div>' +
+        '<div class="ws-name"><span class="ws-lock-icon">&#128274;</span>' + escHtml(name) + '</div>' +
+        '<div class="ws-meta"><span class="ws-date">' + date + '</span>' +
+        '<span class="ws-badge private">' + escHtml(MODE_LABELS[mode]) + '</span></div>' +
+      '</div>';
+    item.style.cursor = 'default';
+    item.title = 'Workspace นี้เป็นส่วนตัว';
+  } else {
+    // ถ้ามี token ใน localStorage → ใส่ hash, ถ้าไม่มี → ไปหน้า workspace เลย (จะเจอ password wall)
+    const href = tok
+      ? '/w/' + ws.id + '/#t=' + encodeURIComponent(tok)
+      : '/w/' + ws.id + '/';
+    const link = document.createElement('a');
+    link.href = href;
+    link.style.cssText = 'text-decoration:none;color:inherit;flex:1';
+    link.innerHTML =
+      '<div class="ws-name">' + escHtml(name) + '</div>' +
+      '<div class="ws-meta"><span class="ws-date">' + date + '</span>' +
+      '<span class="ws-badge ' + mode + '">' + escHtml(MODE_LABELS[mode]) + '</span></div>';
+
+    const right = document.createElement('div');
+    right.className = 'ws-right';
+
+    if (isMine) {
+      const del = document.createElement('button');
+      del.className = 'ws-delete';
+      del.title = 'ลบ';
+      del.innerHTML = '&times;';
+      del.onclick = function(e) { e.preventDefault(); deleteWorkspace(ws.id, name, tok, mode); };
+      right.appendChild(del);
+    }
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'ws-copy';
+    copyBtn.textContent = 'คัดลอกลิงก์';
+    copyBtn.onclick = function(e) { e.preventDefault(); copyWorkspaceLink(ws.id); };
+    right.appendChild(copyBtn);
+
+    const arrow = document.createElement('a');
+    arrow.href = href;
+    arrow.className = 'ws-arrow';
+    arrow.style.cssText = 'text-decoration:none';
+    arrow.innerHTML = '&rarr;';
+    right.appendChild(arrow);
+
+    item.appendChild(link);
+    item.appendChild(right);
+  }
+
+  return item;
+}
+
 async function createWorkspace() {
   const btn = document.getElementById('btnCreate');
   const nameInput = document.getElementById('wsName');
+  const pwInput = document.getElementById('wsPassword');
+  if (_selectedMode !== 'open' && !pwInput.value.trim()) {
+    alert('กรุณาตั้งรหัสสำหรับ workspace นี้');
+    pwInput.focus();
+    return;
+  }
   btn.disabled = true;
   btn.textContent = 'กำลังสร้าง...';
   try {
+    const payload = {name: nameInput.value.trim(), access_mode: _selectedMode};
+    if (_selectedMode !== 'open') payload.password = pwInput.value.trim();
     const r = await fetch('/api/workspaces', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: nameInput.value.trim()})
+      body: JSON.stringify(payload)
     });
     const data = await r.json();
-    // บันทึก token ลง localStorage ของเครื่องนี้
-    const tokens = _getTokens();
-    tokens[data.id] = data.token;
-    _saveTokens(tokens);
+    // บันทึกว่าเป็น workspace ของฉัน
+    _addMyId(data.id);
+    // บันทึก token ลง localStorage เฉพาะ open mode
+    if (_selectedMode === 'open') {
+      const tokens = _getTokens();
+      tokens[data.id] = data.token;
+      _saveTokens(tokens);
+    }
     window.location.href = '/w/' + data.id + '/#t=' + encodeURIComponent(data.token);
   } catch(e) {
     alert('สร้าง workspace ไม่สำเร็จ');
@@ -188,18 +321,46 @@ async function createWorkspace() {
   }
 }
 
-async function deleteWorkspace(id, name, token) {
+async function copyWorkspaceLink(id) {
+  const url = window.location.origin + '/w/' + id + '/';
+  try {
+    await navigator.clipboard.writeText(url);
+    alert('คัดลอกลิงก์แล้ว');
+  } catch {
+    alert('คัดลอกลิงก์ไม่สำเร็จ');
+  }
+}
+
+async function deleteWorkspace(id, name, token, mode) {
   if (!confirm('ลบ workspace "' + name + '" ?\nข้อมูลทั้งหมดจะหายไป')) return;
   try {
+    let ownerToken = token || '';
+    // readonly/private ไม่เก็บ token ใน localStorage -> ขอรหัสตอนลบ
+    if (!ownerToken && mode !== 'open') {
+      const pw = prompt('ใส่รหัสเจ้าของเพื่อยืนยันการลบ workspace นี้');
+      if (!pw || !pw.trim()) return;
+      const loginRes = await fetch('/api/workspaces/' + id + '/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({password: pw.trim()}),
+      });
+      const loginData = await loginRes.json().catch(() => ({}));
+      if (!loginRes.ok || !loginData.token) {
+        alert(loginData.detail || 'รหัสไม่ถูกต้อง');
+        return;
+      }
+      ownerToken = loginData.token;
+    }
+
     const r = await fetch('/api/workspaces/' + id, {
       method: 'DELETE',
-      headers: {'X-Workspace-Token': token || ''}
+      headers: {'X-Workspace-Token': ownerToken}
     });
     if (!r.ok) throw new Error(r.status);
-    // ลบ token ออกจาก localStorage ด้วย
     const tokens = _getTokens();
     delete tokens[id];
     _saveTokens(tokens);
+    _removeMyId(id);
     loadWorkspaces();
   } catch(e) {
     alert('ลบไม่สำเร็จ');

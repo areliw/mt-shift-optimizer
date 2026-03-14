@@ -84,6 +84,21 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+## Security Environment (สำคัญก่อน deploy)
+
+กำหนดตัวแปรเหล่านี้ใน production:
+
+```bash
+API_KEY=<long-random-secret>
+ALLOWED_ORIGINS=https://your-app.example.com,https://admin.example.com
+SESSION_SECRET=<another-long-random-secret>
+DISABLE_WORKSPACE_AUTH=0
+```
+
+หมายเหตุ:
+- ถ้า environment ถูกมองว่าเป็น production แต่ไม่มี `API_KEY` หรือ `ALLOWED_ORIGINS` หรือ `SESSION_SECRET` แอปจะหยุดทำงานทันที (fail fast)
+- `ALLOWED_ORIGINS` ห้ามใช้ `*` ใน production
+
 ## รันเว็บ
 
 ```bash

@@ -55,6 +55,23 @@ def _staff_can_work_position(mt, pos, catalog):
     return True
 
 
+def _shift_bucket(shift_name: str) -> str:
+    """จัดกลุ่มชื่อกะสำหรับกฎเวรซ้อนในวันเดียวกัน
+    - afternoon: มีคำว่า บ่าย / afternoon
+    - night: มีคำว่า ดึก / night
+    - morning: มีคำว่า เช้า / morning
+    - other: อื่นๆ
+    """
+    s = str(shift_name or "").strip().lower()
+    if "ดึก" in s or "night" in s:
+        return "night"
+    if "บ่าย" in s or "afternoon" in s:
+        return "afternoon"
+    if "เช้า" in s or "morning" in s:
+        return "morning"
+    return "other"
+
+
 def _parse_active_days(active_days_str):
     """
     แปลง active_days string → set ของ weekday int (0=จันทร์ … 6=อาทิตย์)
@@ -132,23 +149,49 @@ def _parse_active_weekdays(active_weekdays_str):
     return days if days else None
 
 
+def _parse_active_dates(active_dates_str):
+    """แปลง active_dates string → set ของ day-of-month (1–31) หรือ None ถ้าว่าง = ทุกวัน
+    รูปแบบ: ตัวเลข 1-31 คั่นด้วยจุลภาค เช่น "12,13,18" = วันที่ 12, 13, 18 ของเดือน
+    """
+    if not active_dates_str or not str(active_dates_str).strip():
+        return None
+    days = set()
+    for part in str(active_dates_str).split(","):
+        part = part.strip()
+        if part.isdigit():
+            d = int(part)
+            if 1 <= d <= 31:
+                days.add(d)
+    return days if days else None
+
+
 def _is_slot_active_on_day(shift, pos, day_index, start_date, holiday_set=None):
     """
     เช็คว่า slot (shift+position) นี้ active ในวันนั้นหรือไม่
     - กะต้อง active ตาม active_days + include_holidays
     - ตำแหน่ง: ถ้ามี active_weekdays ต้องเปิดเฉพาะวันนั้น (เช่น "6" = อาทิตย์เท่านั้น)
+    - ตำแหน่ง: ถ้ามี active_dates ต้องเปิดเฉพาะวันที่นั้น (เช่น "12,13,18" = วันที่ 12, 13, 18)
     """
     if not _is_shift_active_on_day(shift, day_index, start_date, holiday_set):
         return False
-    aw = _parse_active_weekdays(pos.get("active_weekdays") if isinstance(pos, dict) else None)
-    if aw is None:
-        return True
-    if start_date is not None:
+    pos_dict = pos if isinstance(pos, dict) else {}
+    # ตรวจ active_weekdays (วันในสัปดาห์)
+    aw = _parse_active_weekdays(pos_dict.get("active_weekdays"))
+    if aw is not None:
+        if start_date is not None:
+            cal_date = start_date + timedelta(days=day_index)
+            weekday = cal_date.weekday()
+        else:
+            weekday = day_index % 7
+        if weekday not in aw:
+            return False
+    # ตรวจ active_dates (วันที่ในเดือน เช่น "12,13,18")
+    ad = _parse_active_dates(pos_dict.get("active_dates"))
+    if ad is not None and start_date is not None:
         cal_date = start_date + timedelta(days=day_index)
-        weekday = cal_date.weekday()
-    else:
-        weekday = day_index % 7
-    return weekday in aw
+        if cal_date.day not in ad:
+            return False
+    return True
 
 
 def _expand_positions(shift_list):
@@ -214,8 +257,8 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
     # 2) แต่ละคน: min เกิน slot/วันที่ลงได้จริง (ทักษะ/ช่วงเวลา/วันหยุด/1-shift-per-day)
     for mt in mt_list:
         mn = int(mt.get("min_shifts_per_month") or 0)
-        mx = mt.get("max_shifts_per_month")
-        mx = int(mx) if mx else None
+        raw_mx = mt.get("max_shifts_per_month")
+        mx = int(raw_mx) if raw_mx is not None and str(raw_mx) != "" else None
 
         # นับ slot ที่ลงได้ (ไม่จำกัด 1/วัน)
         can_work_slots = sum(
@@ -267,7 +310,45 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
                 f"'{mt['name']}' ตั้ง max {mx} < min {mn} — ขัดแย้งกัน"
             )
 
-    # 3) ตำแหน่งต้องการทักษะแต่ไม่มีใครมี
+    # 3) ขั้นต่ำรายคนต่อกะ: เช็คว่าแต่ละคนทำได้ถึงค่าที่ตั้งหรือไม่
+    shift_slots = {}
+    for shift, pos, pos_name, slot_i in expanded:
+        shift_slots.setdefault(shift["name"], []).append((shift, pos, pos_name, slot_i))
+
+    for mt in mt_list:
+        min_by_shift = mt.get("min_shifts_by_shift") or {}
+        if not isinstance(min_by_shift, dict):
+            continue
+        for shift_name, required_min in min_by_shift.items():
+            try:
+                required_min = int(required_min)
+            except Exception:
+                required_min = 0
+            if required_min <= 0:
+                continue
+            slots = shift_slots.get(str(shift_name), [])
+            if not slots:
+                reasons.append(
+                    f"'{mt['name']}' ตั้งขั้นต่ำกะ '{shift_name}' = {required_min} แต่ไม่พบกะนี้ในระบบ"
+                )
+                continue
+
+            workable_days_for_shift = sum(
+                1
+                for day in range(num_days)
+                if available_on_day(mt, day)
+                and any(
+                    _is_slot_active_on_day(s, p, day, start_date, holiday_set)
+                    and _staff_can_work_position(mt, p, catalog)
+                    for s, p, _, _ in slots
+                )
+            )
+            if required_min > workable_days_for_shift:
+                reasons.append(
+                    f"'{mt['name']}' ตั้งขั้นต่ำกะ '{shift_name}' = {required_min} แต่ทำกะนี้ได้สูงสุด {workable_days_for_shift} วัน"
+                )
+
+    # 4) ตำแหน่งต้องการทักษะแต่ไม่มีใครมี
     for shift in shift_list:
         for pos in shift.get("positions", []):
             if not isinstance(pos, dict):
@@ -318,12 +399,23 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
                         f"ตำแหน่ง '{pos_name}' กำหนดเต็มเวลาเท่านั้น แต่มีคนเต็มเวลาแค่ {n_fulltime} คน (ต้องการ {slot_count} คน/วัน)"
                     )
 
+    # 6.1) กะที่ตั้งขั้นต่ำตามฉายา: เช็คว่ามีคนฉายานั้นพอหรือไม่
+    for shift in shift_list:
+        req_title = (shift.get("min_required_title") or "").strip()
+        req_count = max(0, int(shift.get("min_required_count") or 0))
+        if req_title and req_count > 0:
+            n_with_title = sum(1 for mt in mt_list if (mt.get("title") or "").strip() == req_title)
+            if n_with_title < req_count:
+                reasons.append(
+                    f"กะ '{shift.get('name','')}' ต้องการฉายา '{req_title}' อย่างน้อย {req_count} คน แต่มีอยู่ {n_with_title} คน"
+                )
+
     # 7) สรุปรายคน: min vs วันที่ลงได้ (เพื่อช่วย debug)
     staff_summary = []
     for mt in mt_list:
         mn = int(mt.get("min_shifts_per_month") or 0)
-        mx = mt.get("max_shifts_per_month")
-        mx = int(mx) if mx else None
+        raw_mx = mt.get("max_shifts_per_month")
+        mx = int(raw_mx) if raw_mx is not None and str(raw_mx) != "" else None
         avail = sum(1 for day in range(num_days) if available_on_day(mt, day))
         workable_days = sum(
             1 for day in range(num_days)
@@ -339,7 +431,7 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
             status = f"NG (min {mn} > ลงได้ {workable_days} วัน)"
         elif mn > 0 and workable_days - mn <= 2:
             status = f"ตึง (min {mn}, ลงได้ {workable_days} วัน, เหลือแค่ {workable_days - mn})"
-        max_str = f"/{mx}" if mx else ""
+        max_str = f"/{mx}" if mx is not None else ""
         staff_summary.append(f"  {mt['name']}: min={mn}{max_str}, ว่าง {avail} วัน, ลงเวรได้ {workable_days} วัน — {status}")
 
     if staff_summary:
@@ -414,15 +506,33 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
             model.add(sum(day_vars) == 0).only_enforce_if(h.negated())
             has_work[(mt["name"], day)] = h
 
+    extra_shift_penalty_terms = []
     for mt in mt_list:
         for day in range(num_days):
-            model.add(
-                sum(
-                    assign[(mt["name"], day, shift["name"], pos_name, slot_i)]
-                    for shift, pos, pos_name, slot_i in expanded
-                )
-                <= 1
+            day_terms = [
+                assign[(mt["name"], day, shift["name"], pos_name, slot_i)]
+                for shift, pos, pos_name, slot_i in expanded
+            ]
+            day_total = sum(day_terms)
+            # soft constraint: อยากให้ไม่เกิน 1 เวร/วัน แต่ยังยอมได้สูงสุด 2 เวรเมื่อจำเป็น
+            model.add(day_total <= 2)
+
+            extra_shift = model.new_bool_var(
+                f"extra_shift_{mt['name'].replace(' ','_')}_d{day}"
             )
+            model.add(extra_shift >= day_total - 1)
+            extra_shift_penalty_terms.append(extra_shift)
+
+            # ในวันเดียวกัน ห้ามคนเดิมลงซ้ำภายใน "กะเดียวกัน" มากกว่า 1 slot
+            # (แต่ยังอนุญาตให้ลงได้ 2 กะ/วัน ถ้าเป็นคนละกะ)
+            for shift in shift_list:
+                shift_day_terms = [
+                    assign[(mt["name"], day, shift["name"], pos_name, slot_i)]
+                    for s2, pos, pos_name, slot_i in expanded
+                    if s2["name"] == shift["name"]
+                ]
+                if shift_day_terms:
+                    model.add(sum(shift_day_terms) <= 1)
 
     # off_days = วันหยุดประจำสัปดาห์ (0=จันทร์ … 6=อาทิตย์) — ห้ามจัดทุกวันที่มี weekday นี้
     for mt in mt_list:
@@ -461,31 +571,95 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
                 for day in range(num_days):
                     model.add(assign[(mt["name"], day, shift["name"], pos_name, slot_i)] == 0)
 
-    # แต่ละกะ: min_fulltime = เจ้าหน้าที่ประจำขั้นต่ำ (รวมทุกช่องในกะ) 0 = ยืดหยุ่น/pt ได้
-    fulltime_mt = [mt for mt in mt_list if mt.get("type") == "fulltime"]
-    if fulltime_mt:
-        shift_slots = {}  # shift_name -> [(shift, pos, pos_name, slot_i), ...]
-        for shift, pos, pos_name, slot_i in expanded:
-            shift_slots.setdefault(shift["name"], []).append((shift, pos, pos_name, slot_i))
-        for shift in shift_list:
-            sn = shift["name"]
-            min_ft = max(0, int(shift.get("min_fulltime", 0)))
-            if min_ft <= 0:
-                continue
-            slots = shift_slots.get(sn, [])
-            if not slots:
+    # day_shift_overrides: วันที่เฉพาะที่ staff อยู่ได้แค่บาง time_window
+    # เช่น {"7": ["เช้า","บ่าย"]} = วันที่ 7 อยู่ได้แค่เช้า+บ่าย
+    if start_date:
+        for mt in mt_list:
+            dso = mt.get("day_shift_overrides") or {}
+            if not dso:
                 continue
             for day in range(num_days):
-                if not any(_is_slot_active_on_day(s, p, day, start_date, holiday_set) for s, p, _, _ in slots):
+                actual_date = start_date + timedelta(days=day)
+                dom_str = str(actual_date.day)
+                if dom_str not in dso:
                     continue
-                model.add(
-                    sum(
-                        assign[(mt["name"], day, sn, pos_name, slot_i)]
-                        for mt in fulltime_mt
-                        for _, _, pos_name, slot_i in slots
+                allowed_windows = dso[dom_str]  # list of time_window names
+                for shift, pos, pos_name, slot_i in expanded:
+                    pos_tw = (pos.get("time_window_name") or "").strip() if isinstance(pos, dict) else ""
+                    if not pos_tw:
+                        continue  # position ไม่ได้กำหนด time_window → ไม่จำกัด
+                    # เช็คว่า pos_tw อยู่ใน allowed_windows มั้ย
+                    can_work = any(
+                        _window_contains(catalog, aw, pos_tw) for aw in allowed_windows
                     )
-                    >= min_ft
+                    if not can_work:
+                        model.add(assign[(mt["name"], day, shift["name"], pos_name, slot_i)] == 0)
+
+    # แต่ละกะ: ขั้นต่ำตามฉายา (preferred)
+    # legacy fallback: ใช้ min_fulltime (type=fulltime) เฉพาะกะที่ยังไม่ตั้งฉายาขั้นต่ำ
+    shift_slots = {}  # shift_name -> [(shift, pos, pos_name, slot_i), ...]
+    for shift, pos, pos_name, slot_i in expanded:
+        shift_slots.setdefault(shift["name"], []).append((shift, pos, pos_name, slot_i))
+
+    fulltime_mt = [mt for mt in mt_list if mt.get("type") == "fulltime"]
+    for shift in shift_list:
+        sn = shift["name"]
+        slots = shift_slots.get(sn, [])
+        if not slots:
+            continue
+
+        req_title = (shift.get("min_required_title") or "").strip()
+        req_count = max(0, int(shift.get("min_required_count", 0) or 0))
+
+        # legacy fallback
+        if not req_title and req_count <= 0:
+            req_count = max(0, int(shift.get("min_fulltime", 0) or 0))
+            if req_count > 0:
+                req_title = "__legacy_fulltime__"
+
+        if req_count <= 0:
+            continue
+
+        if req_title == "__legacy_fulltime__":
+            eligible = fulltime_mt
+        else:
+            eligible = [mt for mt in mt_list if (mt.get("title") or "").strip() == req_title]
+
+        for day in range(num_days):
+            if not any(_is_slot_active_on_day(s, p, day, start_date, holiday_set) for s, p, _, _ in slots):
+                continue
+            model.add(
+                sum(
+                    assign[(mt["name"], day, sn, pos_name, slot_i)]
+                    for mt in eligible
+                    for _, _, pos_name, slot_i in slots
                 )
+                >= req_count
+            )
+
+    # ขั้นต่ำรายคนต่อกะ เช่น {"เวรดึก": 1}
+    for mt in mt_list:
+        min_by_shift = mt.get("min_shifts_by_shift") or {}
+        if not isinstance(min_by_shift, dict):
+            continue
+        for shift_name, required_min in min_by_shift.items():
+            try:
+                required_min = int(required_min)
+            except Exception:
+                required_min = 0
+            if required_min <= 0:
+                continue
+            slots = shift_slots.get(str(shift_name), [])
+            if not slots:
+                continue
+            model.add(
+                sum(
+                    assign[(mt["name"], day, str(shift_name), pos_name, slot_i)]
+                    for day in range(num_days)
+                    for _, _, pos_name, slot_i in slots
+                )
+                >= required_min
+            )
 
     for shift in shift_list:
         for pos in shift.get("positions", []):
@@ -519,9 +693,9 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
         )
         mn = mt.get("min_shifts_per_month")
         mx = mt.get("max_shifts_per_month")
-        if mn and int(mn) > 0:
+        if mn is not None and str(mn) != "" and int(mn) > 0:
             model.add(total >= int(mn))
-        if mx and int(mx) > 0:
+        if mx is not None and str(mx) != "":
             model.add(total <= int(mx))
 
     # --- min_gap: sliding window — ใน N+1 วันต่อเนื่องทำได้ไม่เกิน 1 วัน (รองรับแยกตามกะ) ---
@@ -724,8 +898,10 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30):
 
     balance_obj = (max_s - min_s) * 10 + sum(tw_balance_terms) if tw_balance_terms else (max_s - min_s)
     spacing_obj = sum(consecutive_penalty_terms) * 5 if consecutive_penalty_terms else 0
+    # ลงมากกว่า 1 เวร/วันได้ แต่โดน penalty สูง เพื่อใช้เป็นทางเลือกสำรองเมื่อจำเป็น
+    extra_shift_obj = sum(extra_shift_penalty_terms) * 100 if extra_shift_penalty_terms else 0
     together_obj = sum(together_penalty_terms) * 3 if together_penalty_terms else 0
-    total_obj = balance_obj + spacing_obj + together_obj
+    total_obj = balance_obj + spacing_obj + extra_shift_obj + together_obj
 
     # ยัดคนที่ skill level สูงกว่าเข้าไปก่อน (ตำแหน่งที่ต้องการทักษะ) — CP-SAT ใช้ integer เท่านั้น
     skill_pref_terms = []

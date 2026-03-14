@@ -1,11 +1,16 @@
 # main.py —- FastAPI entry for MT Shift Optimizer
 
 import collections
+import base64
 import io
 import csv
+import hashlib
+import hmac
+import json
 import logging
 import os
 import re as _re
+import secrets
 import sqlite3
 import time
 from pathlib import Path
@@ -32,6 +37,7 @@ from database import (
     get_workspace,
     list_workspaces,
     set_workspace_context,
+    update_workspace_access_mode,
     verify_workspace_token,
     get_mt_list,
     get_shift_list,
@@ -113,15 +119,74 @@ init_master_db()
 
 app = FastAPI(title="MT Shift Optimizer")
 
+
+def _is_truthy(val: str | None) -> bool:
+    return (val or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _is_production_env() -> bool:
+    """Best-effort production detection with explicit override support."""
+    app_env = (os.environ.get("APP_ENV") or os.environ.get("ENV") or "").strip().lower()
+    if app_env in ("prod", "production"):
+        return True
+    if app_env in ("dev", "development", "local", "test", "testing"):
+        return False
+    if _is_truthy(os.environ.get("FORCE_PRODUCTION")):
+        return True
+    # Heuristics for hosted environments
+    return bool(
+        os.environ.get("RAILWAY_ENVIRONMENT")
+        or os.environ.get("RAILWAY_PROJECT_ID")
+        or os.environ.get("RENDER")
+        or os.environ.get("FLY_APP_NAME")
+    )
+
+
+_IS_PRODUCTION = _is_production_env()
+
+
+# ---------------------------------------------------------------------------
+# API Key authentication
+# Set API_KEY env var to enable.  All /api/* and /w/* routes require the key.
+# In production, API_KEY is mandatory (fail fast).
+# Clients must send:  X-API-Key: <key>
+# ---------------------------------------------------------------------------
+_API_KEY = os.environ.get("API_KEY", "").strip()
+if _IS_PRODUCTION and not _API_KEY:
+    raise RuntimeError("API_KEY is required in production environment")
+if not _API_KEY:
+    logger.warning(
+        "API_KEY env var is not set — all endpoints are publicly accessible. "
+        "Set API_KEY before deploying to production."
+    )
+
 # ---------------------------------------------------------------------------
 # CORS — configure allowed origins via ALLOWED_ORIGINS env var
 # (comma-separated, e.g. "https://app.example.com,https://admin.example.com")
-# Defaults to "*" in dev; set a restrictive list in production.
+# Defaults to localhost origins in dev; must be explicit in production.
 # ---------------------------------------------------------------------------
 _raw_origins = os.environ.get("ALLOWED_ORIGINS", "").strip()
-_ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()] or ["*"]
+if _raw_origins:
+    _ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+else:
+    if _IS_PRODUCTION:
+        raise RuntimeError("ALLOWED_ORIGINS is required in production environment")
+    _ALLOWED_ORIGINS = [
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
+    logger.info("ALLOWED_ORIGINS not set; using local development defaults")
+
 if "*" in _ALLOWED_ORIGINS:
-    logger.warning("CORS is open to all origins. Set ALLOWED_ORIGINS env var in production.")
+    if _IS_PRODUCTION:
+        raise RuntimeError("Wildcard ALLOWED_ORIGINS is not allowed in production")
+    logger.warning("CORS is open to all origins. Avoid '*' outside local testing.")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
@@ -157,27 +222,100 @@ async def rate_limit_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-# ---------------------------------------------------------------------------
-# API Key authentication
-# Set API_KEY env var to enable.  All /api/* and /w/* routes require the key.
-# If API_KEY is unset the server runs in open dev mode (warned at startup).
-# Clients must send:  X-API-Key: <key>
-# ---------------------------------------------------------------------------
-_API_KEY = os.environ.get("API_KEY", "").strip()
-if not _API_KEY:
-    logger.warning(
-        "API_KEY env var is not set — all endpoints are publicly accessible. "
-        "Set API_KEY before deploying to production."
-    )
-
-
 async def verify_api_key(x_api_key: str | None = Header(default=None)):
     """FastAPI dependency: validate X-API-Key header when API_KEY is configured."""
     if not _API_KEY:
         return  # dev mode — skip auth
-    if not x_api_key or x_api_key != _API_KEY:
+    if not x_api_key or not secrets.compare_digest(x_api_key, _API_KEY):
         logger.warning("Rejected request: invalid or missing X-API-Key")
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+# ---------------------------------------------------------------------------
+# Session token helpers (HMAC-signed + expiration)
+# ---------------------------------------------------------------------------
+_SESSION_SECRET = os.environ.get("SESSION_SECRET", "").strip() or _API_KEY
+if not _SESSION_SECRET:
+    if _IS_PRODUCTION:
+        raise RuntimeError("SESSION_SECRET is required in production environment")
+    _SESSION_SECRET = secrets.token_hex(32)
+    logger.warning("SESSION_SECRET is not set. Using ephemeral dev secret for this process.")
+
+_WORKSPACE_SESSION_TTL = int(os.environ.get("WORKSPACE_SESSION_TTL", "43200"))  # 12h
+_ADMIN_SESSION_TTL = int(os.environ.get("ADMIN_SESSION_TTL", "28800"))  # 8h
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(text: str) -> bytes:
+    pad = "=" * (-len(text) % 4)
+    return base64.urlsafe_b64decode((text + pad).encode("ascii"))
+
+
+def _sign_payload(payload: dict) -> str:
+    data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    body = _b64url_encode(data)
+    sig = hmac.new(_SESSION_SECRET.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+    return f"{body}.{_b64url_encode(sig)}"
+
+
+def _verify_signed_token(token: str, expected_type: str) -> dict | None:
+    if not token or "." not in token:
+        return None
+    body, sig = token.split(".", 1)
+    expected_sig = _b64url_encode(
+        hmac.new(_SESSION_SECRET.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+    )
+    if not secrets.compare_digest(sig, expected_sig):
+        return None
+    try:
+        payload = json.loads(_b64url_decode(body).decode("utf-8"))
+    except Exception:
+        return None
+    if payload.get("typ") != expected_type:
+        return None
+    exp = int(payload.get("exp") or 0)
+    if exp <= int(time.time()):
+        return None
+    return payload
+
+
+def _issue_workspace_session_token(workspace_id: str) -> str:
+    return _sign_payload(
+        {"typ": "ws", "wid": workspace_id, "exp": int(time.time()) + _WORKSPACE_SESSION_TTL}
+    )
+
+
+def _verify_workspace_session_token(workspace_id: str, token: str) -> bool:
+    payload = _verify_signed_token(token, expected_type="ws")
+    return bool(payload and payload.get("wid") == workspace_id)
+
+
+def _has_workspace_access_token(workspace_id: str, token: str) -> bool:
+    """Accept either owner token/password or a short-lived signed workspace session token."""
+    return verify_workspace_token(workspace_id, token) or _verify_workspace_session_token(workspace_id, token)
+
+
+def _issue_admin_session_token(admin_id: str) -> str:
+    return _sign_payload(
+        {"typ": "admin", "sub": admin_id, "exp": int(time.time()) + _ADMIN_SESSION_TTL}
+    )
+
+
+def _is_valid_admin_session(token: str | None) -> bool:
+    payload = _verify_signed_token(token or "", expected_type="admin")
+    return bool(payload and payload.get("sub") == _ADMIN_ID)
+
+
+# ---------------------------------------------------------------------------
+# Admin credentials (set via env vars)
+# ---------------------------------------------------------------------------
+_ADMIN_ID = os.environ.get("ADMIN_ID", "")
+_ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+if _ADMIN_ID:
+    logger.info("Admin account configured (id=%s)", _ADMIN_ID)
 
 
 # ---------------------------------------------------------------------------
@@ -217,15 +355,50 @@ if _DISABLE_WORKSPACE_AUTH:
 
 
 async def workspace_dep(workspace_id: str, x_workspace_token: str | None = Header(default=None)):
-    """FastAPI dependency: validate workspace exists AND token matches"""
+    """FastAPI dependency: validate workspace exists + check access based on access_mode.
+    - open: ทุกคนเข้าได้ (read+write)
+    - readonly: ทุกคนอ่านได้ แต่ write ต้องมี token (checked by workspace_write_dep)
+    - private: ต้องมี token ถึงจะเข้าได้เลย
+    """
     ws = get_workspace(workspace_id)
     if ws is None:
         raise HTTPException(status_code=404, detail="Workspace not found")
-    if not _DISABLE_WORKSPACE_AUTH and not verify_workspace_token(workspace_id, x_workspace_token or ""):
-        logger.warning("Rejected workspace access: id=%s invalid token", workspace_id)
-        raise HTTPException(status_code=403, detail="Invalid or missing workspace token")
+    mode = ws.get("access_mode", "open")
+    has_token = _has_workspace_access_token(workspace_id, x_workspace_token or "")
+    # dev mode: bypass เฉพาะ open mode (access_mode ต้อง enforce เสมอ)
+    if _DISABLE_WORKSPACE_AUTH and mode == "open":
+        has_token = True
+    ws["has_token"] = has_token
+
+    if mode == "private" and not has_token:
+        raise HTTPException(status_code=403, detail="Workspace นี้เป็น private — ต้องใส่รหัสเพื่อเข้าถึง")
+
     set_workspace_context(workspace_id)
     return ws
+
+
+@app.middleware("http")
+async def check_workspace_write_access(request: Request, call_next):
+    """Middleware: สำหรับ write requests (POST/PUT/PATCH/DELETE) บน workspace
+    ถ้า mode=readonly หรือ private → ต้องมี token ถึงจะแก้ได้"""
+    path = request.url.path
+    method = request.method.upper()
+    # เฉพาะ workspace-scoped write requests
+    if path.startswith("/w/") and method in ("POST", "PUT", "PATCH", "DELETE"):
+        parts = path.split("/")
+        if len(parts) >= 3:
+            wid = parts[2]
+            ws = get_workspace(wid)
+            if ws:
+                mode = ws.get("access_mode", "open")
+                if mode in ("readonly", "private"):
+                    token = request.headers.get("x-workspace-token", "")
+                    if not _has_workspace_access_token(wid, token):
+                        return JSONResponse(
+                            status_code=403,
+                            content={"detail": "ต้องใส่รหัสเพื่อแก้ไข workspace นี้"},
+                        )
+    return await call_next(request)
 
 
 # --- Pydantic models ---
@@ -241,6 +414,8 @@ class StaffCreate(BaseModel):
     min_gap_days: int | None = None
     min_gap_shifts: list[str] = []
     min_gap_rules: list[dict] = []
+    day_shift_overrides: dict = {}
+    min_shifts_by_shift: dict[str, int] = {}
 
     @field_validator("name")
     @classmethod
@@ -271,6 +446,8 @@ class StaffUpdate(BaseModel):
     min_gap_days: int | None = None
     min_gap_shifts: list[str] = []
     min_gap_rules: list[dict] = []
+    day_shift_overrides: dict = {}
+    min_shifts_by_shift: dict[str, int] = {}
 
     @field_validator("name")
     @classmethod
@@ -299,6 +476,7 @@ class PositionItem(BaseModel):
     allowed_titles: list[str] = []  # ฉายาที่อนุญาต (ว่าง = ทุกฉายา)
     max_per_week: int = 0  # สูงสุดกี่ครั้ง/สัปดาห์ (0 = ไม่จำกัด)
     active_weekdays: str | None = None  # เปิดเฉพาะวัน (0=จ … 6=อา) เช่น "6" = อาทิตย์เท่านั้น ว่าง = ทุกวันที่กะเปิด
+    active_dates: str | None = None  # เปิดเฉพาะวันที่ (1-31) เช่น "12,13,18" ว่าง = ทุกวันที่กะเปิด
 
     @field_validator("name")
     @classmethod
@@ -344,6 +522,8 @@ class ShiftCreate(BaseModel):
     active_days: str | None = None
     include_holidays: bool = False
     min_fulltime: int = 0
+    min_required_title: str | None = None
+    min_required_count: int = 0
 
     @field_validator("name")
     @classmethod
@@ -359,6 +539,8 @@ class ShiftUpdate(BaseModel):
     active_days: str | None = None
     include_holidays: bool = False
     min_fulltime: int = 0
+    min_required_title: str | None = None
+    min_required_count: int = 0
 
     @field_validator("name")
     @classmethod
@@ -419,6 +601,8 @@ class SlotSwap(BaseModel):
 
 class WorkspaceCreate(BaseModel):
     name: str = ""
+    access_mode: str = "open"
+    password: str = ""
 
     @field_validator("name", mode="before")
     @classmethod
@@ -430,11 +614,54 @@ class WorkspaceCreate(BaseModel):
             raise ValueError("ชื่อต้องไม่มีอักขระ < หรือ >")
         return v
 
+    @field_validator("access_mode", mode="before")
+    @classmethod
+    def validate_access_mode(cls, v: str) -> str:
+        v = (v or "open").strip().lower()
+        if v not in ("open", "readonly", "private"):
+            raise ValueError("access_mode ต้องเป็น open, readonly, หรือ private")
+        return v
+
 
 # ==========================================
 # Workspace-scoped router: /w/{workspace_id}/api/...
 # ==========================================
 ws_router = APIRouter(dependencies=[Depends(workspace_dep), Depends(verify_api_key)])
+
+
+# --- API: Workspace info ---
+@ws_router.get("/api/workspace-info")
+def api_workspace_info(workspace_id: str, x_workspace_token: str | None = Header(default=None)):
+    """คืนข้อมูล workspace + บอกว่า client มี token ถูกต้องมั้ย"""
+    ws = get_workspace(workspace_id)
+    has_token = _has_workspace_access_token(workspace_id, x_workspace_token or "")
+    mode = ws.get("access_mode", "open")
+    # dev mode: ถือว่าเป็น owner เฉพาะ open mode
+    if _DISABLE_WORKSPACE_AUTH and mode == "open":
+        has_token = True
+    return {
+        "id": ws["id"],
+        "name": ws["name"],
+        "access_mode": mode,
+        "is_owner": has_token,
+    }
+
+
+@ws_router.put("/api/workspace-mode")
+def api_update_workspace_mode(
+    workspace_id: str,
+    body: dict = Body(...),
+    x_workspace_token: str | None = Header(default=None),
+):
+    """เปลี่ยน access_mode — ต้องมี token (เจ้าของเท่านั้น)"""
+    if not _has_workspace_access_token(workspace_id, x_workspace_token or ""):
+        raise HTTPException(status_code=403, detail="ต้องเป็นเจ้าของ workspace ถึงจะเปลี่ยนโหมดได้")
+    mode = body.get("access_mode", "")
+    if mode not in ("open", "readonly", "private"):
+        raise HTTPException(status_code=400, detail="access_mode ต้องเป็น open, readonly, หรือ private")
+    update_workspace_access_mode(workspace_id, mode)
+    logger.info("Workspace %s access_mode changed to %s", workspace_id, mode)
+    return {"ok": True, "access_mode": mode}
 
 
 # --- API: Staff ---
@@ -495,6 +722,8 @@ def api_create_staff(body: StaffCreate):
             min_gap_days=body.min_gap_days,
             min_gap_shifts=body.min_gap_shifts,
             min_gap_rules=body.min_gap_rules,
+            day_shift_overrides=body.day_shift_overrides,
+            min_shifts_by_shift=body.min_shifts_by_shift,
         )
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail=f"ชื่อ '{body.name}' มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
@@ -520,6 +749,8 @@ def api_update_staff(staff_id: int, body: StaffUpdate):
             min_gap_days=body.min_gap_days,
             min_gap_shifts=body.min_gap_shifts,
             min_gap_rules=body.min_gap_rules,
+            day_shift_overrides=body.day_shift_overrides,
+            min_shifts_by_shift=body.min_shifts_by_shift,
         )
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail=f"ชื่อ '{body.name}' มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
@@ -625,9 +856,23 @@ def api_list_shifts():
 def api_create_shift(body: ShiftCreate):
     positions = None
     if body.positions is not None:
-        positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0)), "active_weekdays": (p.active_weekdays or "").strip() or None} for p in body.positions]
+        positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0)), "active_weekdays": (p.active_weekdays or "").strip() or None, "active_dates": (p.active_dates or "").strip() or None} for p in body.positions]
+    min_required_title = (body.min_required_title or "").strip()
+    min_required_count = max(0, int(body.min_required_count or 0))
+    if min_required_count > 0 and not min_required_title:
+        raise HTTPException(status_code=400, detail="ถ้าตั้งจำนวนขั้นต่ำ ต้องเลือกฉายาที่ต้องการด้วย")
     try:
-        sid = create_shift(body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, include_holidays=body.include_holidays, min_fulltime=body.min_fulltime)
+        sid = create_shift(
+            body.name,
+            body.donor,
+            body.xmatch,
+            positions=positions,
+            active_days=body.active_days,
+            include_holidays=body.include_holidays,
+            min_fulltime=body.min_fulltime,
+            min_required_title=min_required_title or None,
+            min_required_count=min_required_count,
+        )
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="ชื่อกะซ้ำ มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
     out = {"id": sid, "name": body.name}
@@ -672,9 +917,24 @@ def api_clear_all():
 def api_update_shift(shift_id: int, body: ShiftUpdate):
     positions = None
     if body.positions is not None:
-        positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0)), "active_weekdays": (p.active_weekdays or "").strip() or None} for p in body.positions]
+        positions = [{"name": p.name, "constraint_note": p.constraint_note or "", "regular_only": p.regular_only or False, "slot_count": max(1, p.slot_count or 1), "time_window_name": (p.time_window_name or "").strip() or None, "required_skill": (p.required_skill or "").strip() or None, "min_skill_level": max(0, int(p.min_skill_level or 0)), "allowed_titles": list(p.allowed_titles or []), "max_per_week": max(0, int(p.max_per_week or 0)), "active_weekdays": (p.active_weekdays or "").strip() or None, "active_dates": (p.active_dates or "").strip() or None} for p in body.positions]
+    min_required_title = (body.min_required_title or "").strip()
+    min_required_count = max(0, int(body.min_required_count or 0))
+    if min_required_count > 0 and not min_required_title:
+        raise HTTPException(status_code=400, detail="ถ้าตั้งจำนวนขั้นต่ำ ต้องเลือกฉายาที่ต้องการด้วย")
     try:
-        update_shift(shift_id, body.name, body.donor, body.xmatch, positions=positions, active_days=body.active_days, include_holidays=body.include_holidays, min_fulltime=body.min_fulltime)
+        update_shift(
+            shift_id,
+            body.name,
+            body.donor,
+            body.xmatch,
+            positions=positions,
+            active_days=body.active_days,
+            include_holidays=body.include_holidays,
+            min_fulltime=body.min_fulltime,
+            min_required_title=min_required_title or None,
+            min_required_count=min_required_count,
+        )
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="ชื่อกะซ้ำ มีอยู่แล้ว กรุณาใช้ชื่ออื่น")
     out = {"id": shift_id, "name": body.name}
@@ -990,9 +1250,9 @@ app.include_router(ws_router, prefix="/w/{workspace_id}")
 # --- Workspace management API ---
 @app.post("/api/workspaces", dependencies=[Depends(verify_api_key)])
 def api_create_workspace(body: WorkspaceCreate = Body(WorkspaceCreate())):
-    wid, token = create_workspace(body.name)
-    logger.info("Created workspace id=%s name=%r", wid, body.name)
-    return {"id": wid, "token": token, "url": f"/w/{wid}/"}
+    wid, token = create_workspace(body.name, access_mode=body.access_mode, password=body.password.strip())
+    logger.info("Created workspace id=%s name=%r mode=%s", wid, body.name, body.access_mode)
+    return {"id": wid, "token": token, "url": f"/w/{wid}/", "access_mode": body.access_mode}
 
 
 @app.get("/api/workspaces", dependencies=[Depends(verify_api_key)])
@@ -1002,12 +1262,75 @@ def api_list_workspaces():
 
 
 @app.delete("/api/workspaces/{workspace_id}", dependencies=[Depends(verify_api_key)])
-def api_delete_workspace(workspace_id: str):
+def api_delete_workspace(workspace_id: str, x_workspace_token: str | None = Header(default=None)):
+    # ต้องเป็นเจ้าของ workspace เท่านั้นถึงจะลบได้
+    if not _has_workspace_access_token(workspace_id, x_workspace_token or ""):
+        raise HTTPException(status_code=403, detail="ต้องใส่รหัสเจ้าของ workspace ก่อนลบ")
     ok = delete_workspace(workspace_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Workspace not found")
     logger.info("Deleted workspace id=%s", workspace_id)
     return {"ok": True}
+
+
+@app.post("/api/workspaces/{workspace_id}/login", dependencies=[Depends(verify_api_key)])
+def api_workspace_login(workspace_id: str, body: dict = Body(...)):
+    """ใส่รหัส (password) เพื่อเข้าถึง workspace — คืน short-lived session token"""
+    if get_workspace(workspace_id) is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    password = (body.get("password") or "").strip()
+    if not password:
+        raise HTTPException(status_code=400, detail="กรุณาใส่รหัส")
+    if not verify_workspace_token(workspace_id, password):
+        raise HTTPException(status_code=403, detail="รหัสไม่ถูกต้อง")
+    token = _issue_workspace_session_token(workspace_id)
+    return {"ok": True, "token": token, "expires_in": _WORKSPACE_SESSION_TTL}
+
+
+# --- Admin ---
+@app.post("/api/admin/login")
+def api_admin_login(body: dict = Body(...)):
+    """Admin login — คืน admin_token ถ้า id + password ถูก"""
+    if not _ADMIN_ID or not _ADMIN_PASSWORD:
+        raise HTTPException(status_code=404, detail="Admin mode is not configured")
+    aid = (body.get("id") or "").strip()
+    apw = (body.get("password") or "").strip()
+    if not aid or not apw:
+        raise HTTPException(status_code=400, detail="กรุณากรอก ID และรหัส")
+    if aid != _ADMIN_ID or apw != _ADMIN_PASSWORD:
+        logger.warning("Admin login failed: id=%s", aid)
+        raise HTTPException(status_code=403, detail="ID หรือรหัสไม่ถูกต้อง")
+    admin_token = _issue_admin_session_token(aid)
+    logger.info("Admin logged in: id=%s", aid)
+    return {"ok": True, "admin_token": admin_token, "expires_in": _ADMIN_SESSION_TTL}
+
+
+@app.get("/api/admin/workspaces")
+def api_admin_list_workspaces(x_admin_token: str | None = Header(default=None)):
+    """Admin: ดู workspace ทั้งหมดพร้อม token"""
+    if not _is_valid_admin_session(x_admin_token):
+        raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์ admin")
+    return list_workspaces(include_tokens=True)
+
+
+@app.delete("/api/admin/workspaces/{workspace_id}")
+def api_admin_delete_workspace(workspace_id: str, x_admin_token: str | None = Header(default=None)):
+    """Admin: ลบ workspace ใดก็ได้"""
+    if not _is_valid_admin_session(x_admin_token):
+        raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์ admin")
+    ok = delete_workspace(workspace_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    logger.info("Admin deleted workspace id=%s", workspace_id)
+    return {"ok": True}
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page():
+    admin_html = STATIC_DIR / "admin.html"
+    if admin_html.exists():
+        return FileResponse(admin_html)
+    return HTMLResponse("<h1>Admin page not found</h1>", status_code=404)
 
 
 # --- Landing page ---

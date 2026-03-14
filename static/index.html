@@ -22,7 +22,10 @@
       <a href="#" class="app-nav-item" data-page="shifts">☰ กะ <span class="nav-badge" id="nav_badge_shifts">0</span></a>
       <a href="#" class="app-nav-item" data-page="schedule">▦ ตารางล่าสุด</a>
     </nav>
-    <div class="app-sidebar-footer">By MT Score Up! Team</div>
+    <div class="app-sidebar-footer">
+      By MT Score Up! Team
+      <div style="margin-top:6px"><a href="mailto:areliw11111@gmail.com" style="color:#90b4f8;font-size:0.75rem;text-decoration:none">&#9993; รายงานบั๊ค / ติดต่อ</a></div>
+    </div>
   </aside>
 
   <main class="app-main">
@@ -202,13 +205,19 @@
           </div>
         </fieldset>
         <fieldset class="form-section">
+          <legend>จำกัดกะเฉพาะวัน</legend>
+          <div style="font-size:.82rem;color:#888;margin-bottom:6px">ระบุวันที่ + เลือกช่วงที่อยู่ได้ (วันที่ไม่ได้ระบุ = อยู่ได้ทุกช่วงตามปกติ)</div>
+          <div id="staff_day_overrides_list"></div>
+          <button type="button" class="btn-secondary small" onclick="addDayOverrideRow()">+ เพิ่มวัน</button>
+        </fieldset>
+        <fieldset class="form-section">
           <legend>จำนวนกะ / เดือน</legend>
           <div class="form-inline" style="margin-bottom:0">
             <label for="staff_add_min_shifts">ขั้นต่ำ</label>
             <input type="number" id="staff_add_min_shifts" min="0" max="31" placeholder="—" style="width:5rem" />
             <label for="staff_add_max_shifts">สูงสุด</label>
             <input type="number" id="staff_add_max_shifts" min="0" max="31" placeholder="—" style="width:5rem" />
-            <span class="text-muted" style="font-size:.82rem; margin:0">ว่างไว้ = ไม่จำกัด</span>
+            <span class="text-muted" style="font-size:.82rem; margin:0">ว่างไว้ = ไม่จำกัด, สูงสุด = 0 คือไม่ให้ลงเวร</span>
           </div>
         </fieldset>
         <fieldset class="form-section">
@@ -220,6 +229,13 @@
           <div class="form-group" style="margin-top:.5rem">
             <label class="text-muted" style="font-size:.82rem">กำหนดเว้นขั้นต่ำแยกตามกะ (ใส่ตัวเลขเฉพาะกะที่อยากจำกัด)</label>
             <div id="staff_add_min_gap_rules" class="staff-skills-checkboxes"></div>
+          </div>
+        </fieldset>
+        <fieldset class="form-section">
+          <legend>ขั้นต่ำต่อกะรายคน</legend>
+          <div class="form-group" style="margin-top:0">
+            <label class="text-muted" style="font-size:.82rem">ระบุจำนวนเวรขั้นต่ำต่อเดือนเฉพาะกะที่ต้องการ (เช่น เวรดึก = 1)</label>
+            <div id="staff_add_min_shifts_by_shift" class="staff-skills-checkboxes"></div>
           </div>
         </fieldset>
         <fieldset class="form-section">
@@ -280,14 +296,28 @@
             </span>
           </div>
           <div class="form-inline" style="margin-top:.5rem">
-            <label for="shift_active_days">วันที่กะนี้เปิด (0=จ … 6=อา)</label>
-            <input type="text" id="shift_active_days" placeholder="เช่น 5,6 = เสาร์-อาทิตย์ หรือ 0,1,2,3,4 = จ-ศ (ว่าง=ทุกวัน)" style="width:22rem" />
+            <label>วันที่กะนี้เปิด</label>
+            <span id="shift_active_days_checks" style="display:inline-flex;gap:2px;margin-left:4px">
+              <label class="staff-day-cb"><input type="checkbox" value="0" data-ad> จ</label>
+              <label class="staff-day-cb"><input type="checkbox" value="1" data-ad> อ</label>
+              <label class="staff-day-cb"><input type="checkbox" value="2" data-ad> พ</label>
+              <label class="staff-day-cb"><input type="checkbox" value="3" data-ad> พฤ</label>
+              <label class="staff-day-cb"><input type="checkbox" value="4" data-ad> ศ</label>
+              <label class="staff-day-cb"><input type="checkbox" value="5" data-ad> ส</label>
+              <label class="staff-day-cb"><input type="checkbox" value="6" data-ad> อา</label>
+            </span>
+            <button type="button" onclick="document.querySelectorAll('#shift_active_days_checks input').forEach(c=>c.checked=true)" class="btn-secondary small" style="margin-left:4px;padding:2px 6px;font-size:.75rem">ทุกวัน</button>
+            <button type="button" onclick="document.querySelectorAll('#shift_active_days_checks input').forEach(c=>c.checked=false)" class="btn-secondary small" style="padding:2px 6px;font-size:.75rem">ล้าง</button>
+            <input type="hidden" id="shift_active_days" />
             <label class="staff-day-cb" style="margin-left:.5rem">
               <input type="checkbox" id="shift_include_holidays" /> รวมวันหยุดราชการ
             </label>
-            <label for="shift_min_fulltime" style="margin-left:.75rem">เจ้าหน้าที่ประจำขั้นต่ำ</label>
-            <select id="shift_min_fulltime" title="เต็มเวลาขั้นต่ำรวมทุกช่องในกะ (0 = ยืดหยุ่น)">
-              <option value="0">ยืดหยุ่น</option>
+            <label for="shift_min_required_title" style="margin-left:.75rem">เจ้าหน้าที่ขั้นต่ำ (ตามฉายา)</label>
+            <select id="shift_min_required_title" title="เลือกฉายาที่ต้องมีอย่างน้อยต่อกะ">
+              <option value="">ไม่บังคับ</option>
+            </select>
+            <select id="shift_min_required_count" title="จำนวนขั้นต่ำของฉายาที่เลือก">
+              <option value="0">0</option>
               <option value="1">≥1 คน</option>
               <option value="2">≥2 คน</option>
               <option value="3">≥3 คน</option>
