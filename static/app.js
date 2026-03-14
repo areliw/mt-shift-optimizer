@@ -523,11 +523,12 @@ async function showStaffDetail(staffId) {
   });
 
   try {
-    const [staffRes, skillsRes, titlesRes, twRes] = await Promise.all([
+    const [staffRes, skillsRes, titlesRes, twRes, shiftsRes] = await Promise.all([
       fetch(API + "/staff/" + staffId),
       fetch(API + "/skills"),
       fetch(API + "/titles"),
       fetch(API + "/time-windows"),
+      fetch(API + "/shifts"),
     ]);
     if (!staffRes.ok) {
       contentEl.innerHTML = "<p class=\"message error\">โหลดข้อมูลไม่สำเร็จ</p>";
@@ -539,6 +540,8 @@ async function showStaffDetail(staffId) {
     const catalogSkills = await skillsRes.json();
     const catalogTitles = await titlesRes.json();
     const catalogTimeWindows = await twRes.json();
+    const shiftsList = shiftsRes.ok ? await shiftsRes.json() : [];
+    shiftsCache = Array.isArray(shiftsList) ? shiftsList : [];
     const skillsList = Array.isArray(catalogSkills) ? catalogSkills : [];
     const titlesList = Array.isArray(catalogTitles) ? catalogTitles : [];
     const timeWindowsList = Array.isArray(catalogTimeWindows) ? catalogTimeWindows : [];
@@ -606,7 +609,10 @@ async function showStaffDetail(staffId) {
       const min_gap_rules = Array.from(document.querySelectorAll("#staff_edit_form .min-gap-rule-input"))
         .map((el) => ({ shift: el.dataset.shift, gap_days: el.value !== "" ? parseInt(el.value, 10) : 0 }))
         .filter((r) => r.shift && r.gap_days && r.gap_days > 0);
-      const shift_limits = collectShiftLimits("#staff_edit_form");
+      const shiftLimitInputs = document.querySelectorAll("#staff_edit_shift_limits .shift-limit-min-input");
+      const shift_limits = shiftLimitInputs.length
+        ? collectShiftLimits("#staff_edit_shift_limits")
+        : (staff.shift_limits || {});
       msgEl.style.display = "none";
       try {
         const res = await fetch(API + "/staff/" + staffId, {
