@@ -31,6 +31,7 @@ from database import (
     delete_workspace,
     get_workspace,
     get_admin_stats,
+    log_solver_run,
     list_workspaces,
     set_workspace_context,
     verify_workspace_token,
@@ -833,10 +834,13 @@ def api_run_schedule(
     start_date_str = get_schedule_start_date()
     logger.info("Running schedule: num_days=%d start_date=%s staff=%d shifts=%d",
                 num_days, start_date_str, len(mt_list), len(shift_list))
+    import time as _time
+    _t0 = _time.monotonic()
     try:
         slots, solver, status = generate_schedule(num_days=num_days, start_date_str=start_date_str or None)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    _solve_ms = int((_time.monotonic() - _t0) * 1000)
 
     # กรณี solver fail จริงๆ (MODEL_INVALID ฯลฯ) — ไม่ใช่แค่ infeasible
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -884,6 +888,8 @@ def api_run_schedule(
             details.append({"staff_name": name, "day": day, "shifts_on_day": count})
         result["multi_shift_details"] = details
 
+    status_str = "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE"
+    log_solver_run(run_id, status_str, num_days, bool(dummy_slots), len(dummy_slots), _solve_ms)
     logger.info("Schedule run_id=%d saved (slots=%d dummy=%d multi_shift=%d)", run_id, len(slots), len(dummy_slots), len(multi_shift_cases))
     return result
 

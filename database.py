@@ -255,7 +255,8 @@ def get_admin_stats() -> dict:
                 pass
 
         ws_path = WORKSPACES_DIR / f"{wid}.db"
-        schedules = staff = manual_edits = 0
+        schedules = staff = manual_edits = optimal_runs = dummy_runs = 0
+        avg_solve_ms = None
         if ws_path.exists():
             try:
                 wconn = sqlite3.connect(str(ws_path))
@@ -265,6 +266,19 @@ def get_admin_stats() -> dict:
                     manual_edits = wconn.execute(
                         "SELECT COUNT(*) FROM schedule_slot WHERE is_manual_override=1"
                     ).fetchone()[0]
+                except Exception:
+                    pass
+                try:
+                    optimal_runs = wconn.execute(
+                        "SELECT COUNT(*) FROM solver_log WHERE status='OPTIMAL'"
+                    ).fetchone()[0]
+                    dummy_runs = wconn.execute(
+                        "SELECT COUNT(*) FROM solver_log WHERE has_dummy=1"
+                    ).fetchone()[0]
+                    r = wconn.execute(
+                        "SELECT AVG(solve_time_ms) FROM solver_log WHERE solve_time_ms IS NOT NULL"
+                    ).fetchone()[0]
+                    avg_solve_ms = round(r) if r else None
                 except Exception:
                     pass
                 wconn.close()
@@ -282,6 +296,9 @@ def get_admin_stats() -> dict:
             "schedules_run": schedules,
             "staff_count": staff,
             "manual_edits": manual_edits,
+            "optimal_runs": optimal_runs,
+            "dummy_runs": dummy_runs,
+            "avg_solve_ms": avg_solve_ms,
         })
 
     return {
@@ -515,9 +532,44 @@ def init_db(conn=None):
         _migrate_shift_min_fulltime(conn)
         _migrate_shift_sort_order(conn)
         _migrate_shift_title_requirements(conn)
+        _migrate_solver_log(conn)
     finally:
         if close:
             conn.close()
+
+
+def _migrate_solver_log(conn):
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS solver_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                run_id INTEGER,
+                status TEXT,
+                num_days INTEGER,
+                has_dummy INTEGER NOT NULL DEFAULT 0,
+                dummy_count INTEGER NOT NULL DEFAULT 0,
+                solve_time_ms INTEGER
+            )
+        """)
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+
+def log_solver_run(run_id: int, status: str, num_days: int,
+                   has_dummy: bool, dummy_count: int, solve_time_ms: int):
+    """บันทึก solver event ลง workspace DB"""
+    conn = get_connection()
+    try:
+        conn.execute(
+            """INSERT INTO solver_log (run_id, status, num_days, has_dummy, dummy_count, solve_time_ms)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (run_id, status, num_days, int(has_dummy), dummy_count, solve_time_ms),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _migrate_shift_position_holiday_mode(conn):

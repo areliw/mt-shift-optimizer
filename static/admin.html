@@ -170,6 +170,9 @@ function renderTable(ws) {
           <th>Status</th>
           <th>บุคลากร</th>
           <th>ตาราง</th>
+          <th>Optimal</th>
+          <th>มี Dummy</th>
+          <th>Avg Solve</th>
           <th>Manual Edits</th>
         </tr>
       </thead>
@@ -185,6 +188,9 @@ function renderTable(ws) {
             <td>${activityBadge(w.last_accessed)}</td>
             <td class="num">${w.staff_count}</td>
             <td class="num">${w.schedules_run}</td>
+            <td class="num">${w.optimal_runs ?? "—"}</td>
+            <td class="num">${w.dummy_runs ?? "—"}</td>
+            <td style="color:#64748b;font-size:.8rem">${w.avg_solve_ms != null ? (w.avg_solve_ms/1000).toFixed(1)+"s" : "—"}</td>
             <td class="num">${w.manual_edits}</td>
           </tr>
         `).join("")}
