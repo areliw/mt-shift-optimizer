@@ -1272,8 +1272,6 @@ def api_export_schedule_xlsx(run_id: int | None = None):
             c.border = BDR
             if row_base_fill:
                 c.fill = row_base_fill
-            elif day % 2 == 1:
-                c.fill = fill("F8FAFC")
             return c
 
         set_day_cell(1, date_label, bold=is_holiday or is_weekend)
@@ -1297,8 +1295,6 @@ def api_export_schedule_xlsx(run_id: int | None = None):
                 c.value = s.get("staff_name", "")
                 if row_base_fill:
                     c.fill = row_base_fill
-                elif day % 2 == 1:
-                    c.fill = fill("F8FAFC")
                 else:
                     c.fill = fill(SHIFT_BG[shift_color_idx[sn]])
 
