@@ -3227,7 +3227,7 @@ document.getElementById("run_schedule").addEventListener("click", async () => {
       const secs = d.elapsed != null ? d.elapsed.toFixed(0) : "?";
       const sols = d.solutions || 0;
       if (btnText) btnText.textContent = `กำลังสร้าง... ${pct}%`;
-      pText.textContent = `${pct}% — ${secs}s — พบ ${sols} วิธี`;
+      pText.textContent = `${pct}% — ${secs}s — ชนะไปแล้ว ${sols} วิธี`;
     } catch {}
   });
   es.addEventListener("result", async (e) => {
