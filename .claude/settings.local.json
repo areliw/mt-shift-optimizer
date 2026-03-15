@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(gh auth status)"
+      "Bash(gh auth status)",
+      "Bash(python -c \"import main; print\\(''OK''\\)\")",
+      "Bash(python -c \"import main; print\\(''''OK''''\\)\")"
     ]
   }
 }
