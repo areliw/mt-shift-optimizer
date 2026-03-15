@@ -1191,6 +1191,14 @@ def api_list_workspaces():
     return list_workspaces(include_tokens=_DISABLE_WORKSPACE_AUTH)
 
 
+@app.get("/api/workspaces/{workspace_id}")
+def api_get_workspace(workspace_id: str):
+    ws = get_workspace(workspace_id)
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return ws
+
+
 @app.delete("/api/workspaces/{workspace_id}", dependencies=[Depends(verify_api_key)])
 def api_delete_workspace(workspace_id: str):
     ok = delete_workspace(workspace_id)

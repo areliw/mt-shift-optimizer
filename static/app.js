@@ -3494,69 +3494,204 @@ document.getElementById("import_json_file").addEventListener("change", async (e)
 });
 
 // --- Print Schedule A4 ---
+// Shift color palette (bg, header bg, header text)
+const SHIFT_COLORS = [
+  { bg: "#dbeafe", hbg: "#1d4ed8", htxt: "#ffffff" }, // blue
+  { bg: "#dcfce7", hbg: "#15803d", htxt: "#ffffff" }, // green
+  { bg: "#fef9c3", hbg: "#a16207", htxt: "#ffffff" }, // yellow
+  { bg: "#fce7f3", hbg: "#9d174d", htxt: "#ffffff" }, // pink
+  { bg: "#f3e8ff", hbg: "#6b21a8", htxt: "#ffffff" }, // purple
+  { bg: "#ffedd5", hbg: "#c2410c", htxt: "#ffffff" }, // orange
+  { bg: "#cffafe", hbg: "#0e7490", htxt: "#ffffff" }, // cyan
+  { bg: "#e0e7ff", hbg: "#3730a3", htxt: "#ffffff" }, // indigo
+];
+
 document.getElementById("print_schedule").addEventListener("click", () => {
   const wrap = document.getElementById("schedule_table_wrap");
   const table = wrap ? wrap.querySelector("table") : null;
   if (!table) { alert("ยังไม่มีตาราง"); return; }
   const metaEl = document.getElementById("schedule_meta");
-  const title = metaEl ? metaEl.textContent : "ตารางเวร";
+  const metaText = metaEl ? metaEl.textContent : "";
+
+  // Extract date range from meta text (e.g. "1 ม.ค. – 31 ม.ค.")
+  const dateRangeMatch = metaText.match(/·\s*(.+)$/);
+  const dateRange = dateRangeMatch ? dateRangeMatch[1].trim() : "";
+  const wsName = _workspaceName || "";
 
   const printWin = window.open("", "_blank");
-  const safeTitle = title.replace(/&/g,"&amp;").replace(/</g,"&lt;");
-  printWin.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>${safeTitle}</title>
-<style>
-@page { size: A4 landscape; margin: 8mm; }
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: "Sarabun", "Noto Sans Thai", sans-serif; font-size: 7.5pt; }
-h2 { font-size: 11pt; text-align: center; margin-bottom: 4px; }
-table.schedule { width: 100%; border-collapse: collapse; table-layout: fixed; }
-table.schedule th, table.schedule td {
-  border: 1px solid #555; padding: 1px 2px; text-align: center;
-  font-size: 7pt; word-break: keep-all; overflow: hidden;
-  white-space: nowrap; text-overflow: ellipsis;
-}
-table.schedule th { background: #e2e8f0; font-weight: 600; }
-.th-room { background: #cbd5e1; font-size: 8pt; }
-.th-day, table.schedule td:first-child { background: #f1f5f9; font-weight: 600; white-space: nowrap; width: 50px; min-width: 50px; }
-.td-has-dummy { background: #fee2e2; color: #b91c1c; font-weight: 700; }
-.td-inactive { color: #aaa; }
-.tr-holiday td { background: #dcfce7; }
-.tr-holiday td:first-child { background: #bbf7d0; font-weight: 700; }
-table.schedule tr:nth-child(even) td { background: #f8fafc; }
-table.schedule tr:nth-child(even) td:first-child { background: #f1f5f9; }
-.page-break { page-break-before: always; }
-h3 { font-size: 10pt; text-align: center; margin: 6px 0 4px; }
-table.summary { border-collapse: collapse; table-layout: auto; margin: 0 auto; }
-table.summary th, table.summary td {
-  border: 1px solid #888; padding: 2px 6px; text-align: center;
-  font-size: 8pt; white-space: nowrap;
-}
-table.summary th { background: #e2e8f0; font-weight: 600; }
-table.summary tr:nth-child(even) td { background: #f8fafc; }
-.stats-line { text-align: center; margin-bottom: 4px; font-size: 8pt; }
-@media print {
-  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-}
-</style></head><body>
-<h2>${safeTitle}</h2>
-`);
 
-  // Clone schedule table — strip interactive attrs
+  // Clone table and strip interactive attrs
   const clone = table.cloneNode(true);
   clone.classList.add("schedule");
   clone.querySelectorAll("[data-run],[data-day],[data-shift],[data-pos],[data-slot],[data-name]").forEach(el => {
     ["data-run","data-day","data-shift","data-pos","data-slot","data-name"].forEach(a => el.removeAttribute(a));
     el.style.cursor = "default";
   });
+
+  // Color-code columns by shift index
+  // th-shift headers define shift groups — find them and map column ranges
+  const thShifts = clone.querySelectorAll("th.th-shift");
+  const shiftColorMap = {}; // shiftName -> color
+  thShifts.forEach((th, i) => {
+    const sn = th.textContent.trim();
+    shiftColorMap[sn] = SHIFT_COLORS[i % SHIFT_COLORS.length];
+    const c = SHIFT_COLORS[i % SHIFT_COLORS.length];
+    th.style.background = c.hbg;
+    th.style.color = c.htxt;
+    th.style.fontWeight = "700";
+  });
+  // Color th-pos headers and td cells by matching data-room/data-shift text
+  // Use column index approach: build col→shiftIdx map from th-shift row
+  const headerRows = clone.querySelectorAll("thead tr");
+  let shiftRow = null;
+  headerRows.forEach(r => { if (r.querySelector("th.th-shift")) shiftRow = r; });
+  if (shiftRow) {
+    // Map col index → color
+    const colColors = [];
+    let colIdx = 1; // skip first col (day)
+    shiftRow.querySelectorAll("th.th-shift").forEach((th, i) => {
+      const span = parseInt(th.getAttribute("colspan") || "1");
+      const c = SHIFT_COLORS[i % SHIFT_COLORS.length];
+      for (let k = 0; k < span; k++) colColors[colIdx++] = c;
+    });
+    // Apply to th-pos
+    headerRows.forEach(r => {
+      let ci = 0;
+      r.querySelectorAll("th").forEach(th => {
+        if (th.classList.contains("th-day")) { ci++; return; }
+        const span = parseInt(th.getAttribute("colspan") || "1");
+        const c = colColors[ci];
+        if (c && th.classList.contains("th-pos")) {
+          th.style.background = c.hbg + "22";
+          th.style.color = "#1e293b";
+          th.style.borderTop = "2px solid " + c.hbg;
+        }
+        ci += span;
+      });
+    });
+    // Apply to td cells
+    clone.querySelectorAll("tbody tr").forEach(row => {
+      let ci = 0;
+      row.querySelectorAll("td").forEach(td => {
+        if (ci === 0) { ci++; return; } // day col
+        const c = colColors[ci];
+        if (c && !td.classList.contains("td-has-dummy") && !td.classList.contains("td-inactive")) {
+          td.style.background = c.bg;
+        }
+        ci++;
+      });
+    });
+  }
+
+  // Style holiday rows — override with a distinct color
+  clone.querySelectorAll("tr.tr-holiday").forEach(row => {
+    row.querySelectorAll("td:not(:first-child)").forEach(td => {
+      if (!td.classList.contains("td-has-dummy")) {
+        td.style.background = "#fef08a";
+      }
+    });
+  });
+
+  const now = new Date();
+  const printedAt = now.toLocaleDateString("th-TH", { year: "numeric", month: "long", day: "numeric" });
+
+  printWin.document.write(`<!DOCTYPE html><html><head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<title>ตารางเวร</title>
+<style>
+@page { size: A4 landscape; margin: 10mm 8mm 12mm; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: "Sarabun", "Noto Sans Thai", sans-serif; font-size: 8pt; color: #1e293b; }
+
+/* ── Header ── */
+.print-header { display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 3px solid #1d4ed8; padding-bottom: 5px; margin-bottom: 7px; }
+.print-header-left { display: flex; flex-direction: column; gap: 1px; }
+.print-title { font-size: 14pt; font-weight: 700; color: #1d4ed8; letter-spacing: -0.3px; }
+.print-subtitle { font-size: 9pt; color: #475569; }
+.print-header-right { text-align: right; font-size: 7.5pt; color: #64748b; line-height: 1.6; }
+
+/* ── Schedule Table ── */
+table.schedule { width: 100%; border-collapse: collapse; table-layout: fixed; }
+table.schedule th, table.schedule td {
+  border: 1px solid #cbd5e1; padding: 2px 3px; text-align: center;
+  font-size: 7pt; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+table.schedule thead th { font-weight: 700; }
+.th-room { background: #0f172a !important; color: #f8fafc !important; font-size: 8pt; letter-spacing: 0.3px; }
+.th-day { background: #f1f5f9 !important; color: #334155; font-weight: 700; width: 52px; min-width: 52px; }
+table.schedule td:first-child { background: #f8fafc !important; font-weight: 600; white-space: nowrap; width: 52px; min-width: 52px; }
+.td-has-dummy { background: #fee2e2 !important; color: #b91c1c !important; font-weight: 700; }
+.td-inactive { background: #f8fafc !important; color: #94a3b8 !important; }
+tr.tr-holiday td:first-child { background: #fef08a !important; font-weight: 700; }
+
+/* ── Legend ── */
+.legend { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
+.legend-item { display: flex; align-items: center; gap: 4px; font-size: 7.5pt; color: #334155; }
+.legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.legend-holiday { background: #fef08a; border: 1px solid #ca8a04; }
+.legend-dummy { background: #fee2e2; border: 1px solid #f87171; }
+
+/* ── Summary (page 2) ── */
+.page-break { page-break-before: always; }
+.summary-header { border-bottom: 3px solid #1d4ed8; padding-bottom: 5px; margin-bottom: 8px; }
+.summary-title { font-size: 12pt; font-weight: 700; color: #1d4ed8; }
+.summary-sub { font-size: 8.5pt; color: #475569; margin-top: 2px; }
+table.summary { border-collapse: collapse; table-layout: auto; margin: 0 auto; }
+table.summary th, table.summary td {
+  border: 1px solid #cbd5e1; padding: 3px 8px; text-align: center;
+  font-size: 8pt; white-space: nowrap;
+}
+table.summary thead th { background: #1d4ed8; color: #fff; font-weight: 700; }
+table.summary tbody tr:nth-child(even) td { background: #f8fafc; }
+table.summary tbody tr:hover td { background: #eff6ff; }
+
+/* ── Footer ── */
+@page { @bottom-right { content: "หน้า " counter(page) "/" counter(pages); font-size: 7pt; } }
+.print-footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: right;
+  font-size: 6.5pt; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 3px; }
+
+@media print {
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+</style></head><body>
+
+<div class="print-header">
+  <div class="print-header-left">
+    <span class="print-title">ตารางเวร${wsName ? " — " + wsName.replace(/&/g,"&amp;").replace(/</g,"&lt;") : ""}</span>
+    <span class="print-subtitle">${dateRange ? "ประจำเดือน " + dateRange.replace(/&/g,"&amp;").replace(/</g,"&lt;") : ""}</span>
+  </div>
+  <div class="print-header-right">
+    พิมพ์เมื่อ ${printedAt}<br>
+    <span style="color:#94a3b8">Shift Optimizer</span>
+  </div>
+</div>
+`);
+
   printWin.document.write(clone.outerHTML);
 
-  // Summary on a new page
+  // Legend
+  const shiftNames = Array.from(thShifts).map(th => th.textContent.trim());
+  let legendHtml = '<div class="legend">';
+  shiftNames.forEach((sn, i) => {
+    const c = SHIFT_COLORS[i % SHIFT_COLORS.length];
+    legendHtml += `<div class="legend-item"><div class="legend-dot" style="background:${c.bg};border:1px solid ${c.hbg}"></div>${sn.replace(/&/g,"&amp;").replace(/</g,"&lt;")}</div>`;
+  });
+  legendHtml += '<div class="legend-item"><div class="legend-dot legend-holiday"></div>วันหยุด</div>';
+  legendHtml += '<div class="legend-item"><div class="legend-dot legend-dummy"></div>ช่องว่าง (จัดไม่ได้)</div>';
+  legendHtml += '</div>';
+  printWin.document.write(legendHtml);
+
+  // Summary on page 2
   const summary = document.getElementById("schedule_summary");
   if (summary) {
-    printWin.document.write('<div class="page-break"></div>');
-    printWin.document.write('<h3>' + safeTitle + ' - สรุปเวรต่อคน</h3>');
-    // Rebuild summary as a proper table
+    printWin.document.write(`<div class="page-break"></div>
+<div class="summary-header">
+  <div class="summary-title">สรุปเวรต่อคน${wsName ? " — " + wsName.replace(/&/g,"&amp;").replace(/</g,"&lt;") : ""}</div>
+  <div class="summary-sub">${dateRange ? "ประจำเดือน " + dateRange.replace(/&/g,"&amp;").replace(/</g,"&lt;") : ""}</div>
+</div>`);
     const summaryClone = summary.cloneNode(true);
     summaryClone.querySelectorAll("table").forEach(t => {
       t.classList.add("summary");
@@ -3568,7 +3703,7 @@ table.summary tr:nth-child(even) td { background: #f8fafc; }
 
   printWin.document.write('</body></html>');
   printWin.document.close();
-  setTimeout(() => { printWin.focus(); printWin.print(); }, 400);
+  setTimeout(() => { printWin.focus(); printWin.print(); }, 600);
 });
 
 // --- Staff Pairs ---
@@ -3664,6 +3799,13 @@ document.getElementById("add_pair").addEventListener("click", async () => {
     alert("เกิดข้อผิดพลาด: " + e.message);
   }
 });
+
+let _workspaceName = "";
+if (WORKSPACE_ID) {
+  fetch("/api/workspaces/" + WORKSPACE_ID).then(r => r.ok ? r.json() : null).then(ws => {
+    if (ws && ws.name) _workspaceName = ws.name;
+  }).catch(() => {});
+}
 
 async function init() {
   fillPresetYear();
