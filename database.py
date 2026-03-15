@@ -238,18 +238,25 @@ def get_admin_stats() -> dict:
     total_schedules = 0
     total_staff = 0
     total_manual_edits = 0
+    total_optimal_runs = 0
+    total_dummy_runs_global = 0
+    never_ran_count = 0
+    churned_count = 0
+    activation_count = 0
+    solve_ms_list = []
     ws_details = []
 
     for wid, name, created_at, last_accessed in workspaces:
+        last_accessed_delta = None
         if last_accessed:
             try:
                 la = datetime.fromisoformat(last_accessed.replace("Z", "+00:00"))
                 if la.tzinfo is None:
                     la = la.replace(tzinfo=timezone.utc)
-                delta = (now - la).days
-                if delta <= 7:
+                last_accessed_delta = (now - la).days
+                if last_accessed_delta <= 7:
                     active_7d += 1
-                if delta <= 30:
+                if last_accessed_delta <= 30:
                     active_30d += 1
             except Exception:
                 pass
@@ -257,6 +264,12 @@ def get_admin_stats() -> dict:
         ws_path = WORKSPACES_DIR / f"{wid}.db"
         schedules = staff = manual_edits = optimal_runs = dummy_runs = 0
         avg_solve_ms = None
+        total_solver_runs = 0
+        first_run_date = None
+        last_run_date = None
+        avg_staff_at_run = None
+        time_to_first_run_days = None
+
         if ws_path.exists():
             try:
                 wconn = sqlite3.connect(str(ws_path))
@@ -269,6 +282,7 @@ def get_admin_stats() -> dict:
                 except Exception:
                     pass
                 try:
+                    total_solver_runs = wconn.execute("SELECT COUNT(*) FROM solver_log").fetchone()[0]
                     optimal_runs = wconn.execute(
                         "SELECT COUNT(*) FROM solver_log WHERE status='OPTIMAL'"
                     ).fetchone()[0]
@@ -279,15 +293,69 @@ def get_admin_stats() -> dict:
                         "SELECT AVG(solve_time_ms) FROM solver_log WHERE solve_time_ms IS NOT NULL"
                     ).fetchone()[0]
                     avg_solve_ms = round(r) if r else None
+                    row_dates = wconn.execute(
+                        "SELECT MIN(created_at), MAX(created_at) FROM solver_log"
+                    ).fetchone()
+                    first_run_date = row_dates[0]
+                    last_run_date = row_dates[1]
+                    r2 = wconn.execute(
+                        "SELECT AVG(staff_count) FROM solver_log WHERE staff_count IS NOT NULL AND staff_count > 0"
+                    ).fetchone()[0]
+                    avg_staff_at_run = round(r2, 1) if r2 else None
                 except Exception:
                     pass
                 wconn.close()
             except Exception:
                 pass
 
+        # time to first run
+        if first_run_date and created_at:
+            try:
+                ws_created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                if ws_created.tzinfo is None:
+                    ws_created = ws_created.replace(tzinfo=timezone.utc)
+                first_run_dt = datetime.fromisoformat(first_run_date.replace("Z", "+00:00"))
+                if first_run_dt.tzinfo is None:
+                    first_run_dt = first_run_dt.replace(tzinfo=timezone.utc)
+                time_to_first_run_days = max(0, (first_run_dt - ws_created).days)
+            except Exception:
+                pass
+
+        # optimal_pct / dummy_pct
+        optimal_pct = int(optimal_runs / total_solver_runs * 100) if total_solver_runs > 0 else 0
+        dummy_pct = int(dummy_runs / total_solver_runs * 100) if total_solver_runs > 0 else 0
+
+        # engagement score
+        engagement_score = 0
+        if staff > 0:
+            engagement_score += 15
+        if schedules > 0:
+            engagement_score += 15
+        if schedules >= 3:
+            engagement_score += 20
+        if last_accessed_delta is not None and last_accessed_delta <= 7:
+            engagement_score += 20
+        elif last_accessed_delta is not None and last_accessed_delta <= 30:
+            engagement_score += 15
+        if optimal_pct >= 70:
+            engagement_score += 15
+
         total_schedules += schedules
         total_staff += staff
         total_manual_edits += manual_edits
+        total_optimal_runs += optimal_runs
+        total_dummy_runs_global += dummy_runs
+        if avg_solve_ms is not None:
+            solve_ms_list.append(avg_solve_ms)
+
+        # activation / churn / never ran
+        if schedules > 0:
+            activation_count += 1
+            if last_accessed_delta is not None and last_accessed_delta > 30:
+                churned_count += 1
+        else:
+            never_ran_count += 1
+
         ws_details.append({
             "id": wid,
             "name": name,
@@ -299,7 +367,19 @@ def get_admin_stats() -> dict:
             "optimal_runs": optimal_runs,
             "dummy_runs": dummy_runs,
             "avg_solve_ms": avg_solve_ms,
+            "total_solver_runs": total_solver_runs,
+            "first_run_date": first_run_date,
+            "last_run_date": last_run_date,
+            "avg_staff_at_run": avg_staff_at_run,
+            "time_to_first_run_days": time_to_first_run_days,
+            "optimal_pct": optimal_pct,
+            "dummy_pct": dummy_pct,
+            "engagement_score": engagement_score,
         })
+
+    activation_rate = int(activation_count / total_workspaces * 100) if total_workspaces > 0 else 0
+    avg_solve_ms_global = round(sum(solve_ms_list) / len(solve_ms_list)) if solve_ms_list else None
+    avg_runs_per_workspace = round(total_schedules / total_workspaces, 1) if total_workspaces > 0 else 0
 
     return {
         "total_workspaces": total_workspaces,
@@ -309,6 +389,13 @@ def get_admin_stats() -> dict:
         "total_staff_managed": total_staff,
         "total_manual_edits": total_manual_edits,
         "estimated_hours_saved": total_schedules * 2,
+        "total_optimal_runs": total_optimal_runs,
+        "total_dummy_runs": total_dummy_runs_global,
+        "activation_rate": activation_rate,
+        "avg_solve_ms_global": avg_solve_ms_global,
+        "avg_runs_per_workspace": avg_runs_per_workspace,
+        "never_ran_count": never_ran_count,
+        "churned_count": churned_count,
         "workspaces": ws_details,
     }
 
@@ -555,17 +642,25 @@ def _migrate_solver_log(conn):
         conn.commit()
     except sqlite3.OperationalError:
         pass
+    # add staff_count and shift_count if missing
+    for col in ["staff_count", "shift_count"]:
+        try:
+            conn.execute(f"ALTER TABLE solver_log ADD COLUMN {col} INTEGER")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
 
 
 def log_solver_run(run_id: int, status: str, num_days: int,
-                   has_dummy: bool, dummy_count: int, solve_time_ms: int):
+                   has_dummy: bool, dummy_count: int, solve_time_ms: int,
+                   staff_count: int = 0, shift_count: int = 0):
     """บันทึก solver event ลง workspace DB"""
     conn = get_connection()
     try:
         conn.execute(
-            """INSERT INTO solver_log (run_id, status, num_days, has_dummy, dummy_count, solve_time_ms)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (run_id, status, num_days, int(has_dummy), dummy_count, solve_time_ms),
+            """INSERT INTO solver_log (run_id, status, num_days, has_dummy, dummy_count, solve_time_ms, staff_count, shift_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (run_id, status, num_days, int(has_dummy), dummy_count, solve_time_ms, staff_count, shift_count),
         )
         conn.commit()
     finally:

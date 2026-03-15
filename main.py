@@ -889,7 +889,8 @@ def api_run_schedule(
         result["multi_shift_details"] = details
 
     status_str = "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE"
-    log_solver_run(run_id, status_str, num_days, bool(dummy_slots), len(dummy_slots), _solve_ms)
+    log_solver_run(run_id, status_str, num_days, bool(dummy_slots), len(dummy_slots), _solve_ms,
+                   staff_count=len(mt_list), shift_count=len(shift_list))
     logger.info("Schedule run_id=%d saved (slots=%d dummy=%d multi_shift=%d)", run_id, len(slots), len(dummy_slots), len(multi_shift_cases))
     return result
 

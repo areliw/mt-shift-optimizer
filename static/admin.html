@@ -3,90 +3,221 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MT Shift — Admin Dashboard</title>
+<title>MT Shift — Admin Analytics</title>
 <style>
+  :root {
+    --blue: #1e40af;
+    --green: #16a34a;
+    --yellow: #d97706;
+    --red: #dc2626;
+    --orange: #ea580c;
+    --gray: #64748b;
+    --bg: #f1f5f9;
+    --card: #ffffff;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', sans-serif; background: #f0f4f8; color: #1a202c; min-height: 100vh; }
-  header { background: #1e40af; color: white; padding: 1.25rem 2rem; display: flex; align-items: center; gap: 1rem; }
-  header h1 { font-size: 1.3rem; font-weight: 700; }
-  header span { opacity: 0.7; font-size: 0.85rem; }
-  .container { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: #1e293b; min-height: 100vh; }
 
-  /* KPI cards */
-  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
-  .kpi { background: white; border-radius: 12px; padding: 1.25rem 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
-  .kpi .label { font-size: 0.78rem; color: #64748b; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .4rem; }
-  .kpi .value { font-size: 2rem; font-weight: 800; color: #1e40af; line-height: 1; }
-  .kpi .sub { font-size: 0.78rem; color: #94a3b8; margin-top: .3rem; }
-  .kpi.green .value { color: #16a34a; }
-  .kpi.orange .value { color: #d97706; }
-  .kpi.purple .value { color: #7c3aed; }
+  /* Header */
+  header {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+    color: white; padding: 1rem 2rem;
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+    box-shadow: 0 2px 8px rgba(30,64,175,.3);
+  }
+  header h1 { font-size: 1.25rem; font-weight: 800; letter-spacing: -.02em; flex: 1; }
+  header .meta { font-size: .8rem; opacity: .7; }
+  .header-btn {
+    background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3);
+    color: white; padding: .4rem .9rem; border-radius: 8px; cursor: pointer;
+    font-size: .82rem; font-weight: 600; transition: background .15s;
+  }
+  .header-btn:hover { background: rgba(255,255,255,.25); }
+  .header-btn.green { background: rgba(22,163,74,.3); border-color: rgba(22,163,74,.5); }
+  .auto-refresh-label { font-size: .78rem; opacity: .8; display: flex; align-items: center; gap: .4rem; cursor: pointer; }
 
-  /* Table */
-  .card { background: white; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); overflow: hidden; }
-  .card-header { padding: 1rem 1.5rem; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; }
-  .card-header h2 { font-size: 1rem; font-weight: 600; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-  thead th { background: #f8fafc; padding: .75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: .05em; color: #64748b; font-weight: 600; }
-  tbody tr { border-top: 1px solid #f1f5f9; transition: background .15s; }
+  .container { max-width: 1280px; margin: 1.5rem auto; padding: 0 1.5rem; }
+
+  /* KPI strip */
+  .kpi-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: .9rem; margin-bottom: 1.5rem; }
+  .kpi { background: var(--card); border-radius: 12px; padding: 1.1rem 1.25rem; box-shadow: 0 1px 4px rgba(0,0,0,.07); border-top: 3px solid transparent; }
+  .kpi.blue { border-top-color: var(--blue); }
+  .kpi.green { border-top-color: var(--green); }
+  .kpi.yellow { border-top-color: var(--yellow); }
+  .kpi.red { border-top-color: var(--red); }
+  .kpi.gray { border-top-color: var(--gray); }
+  .kpi .kpi-label { font-size: .7rem; color: var(--gray); text-transform: uppercase; letter-spacing: .06em; margin-bottom: .3rem; }
+  .kpi .kpi-value { font-size: 1.9rem; font-weight: 800; line-height: 1; color: #1e293b; }
+  .kpi.blue .kpi-value { color: var(--blue); }
+  .kpi.green .kpi-value { color: var(--green); }
+  .kpi.yellow .kpi-value { color: var(--yellow); }
+  .kpi.red .kpi-value { color: var(--red); }
+  .kpi .kpi-sub { font-size: .72rem; color: #94a3b8; margin-top: .25rem; }
+
+  /* Row layout */
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; margin-bottom: 1.5rem; }
+  @media (max-width: 768px) { .row2 { grid-template-columns: 1fr; } }
+
+  /* Card */
+  .card { background: var(--card); border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.07); overflow: hidden; }
+  .card-header { padding: .9rem 1.25rem; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+  .card-header h2 { font-size: .95rem; font-weight: 700; }
+  .card-body { padding: 1.25rem; }
+
+  /* Funnel */
+  .funnel-step { margin-bottom: 1rem; }
+  .funnel-step:last-child { margin-bottom: 0; }
+  .funnel-label { display: flex; justify-content: space-between; font-size: .8rem; margin-bottom: .3rem; }
+  .funnel-label span:first-child { color: #334155; font-weight: 600; }
+  .funnel-label span:last-child { color: var(--gray); }
+  .funnel-bar-bg { background: #e2e8f0; border-radius: 6px; height: 12px; overflow: hidden; }
+  .funnel-bar { height: 12px; border-radius: 6px; transition: width .4s ease; }
+
+  /* Solver quality box */
+  .sq-row { display: flex; align-items: center; justify-content: space-between; padding: .65rem 0; border-bottom: 1px solid #f1f5f9; }
+  .sq-row:last-child { border-bottom: none; }
+  .sq-key { font-size: .82rem; color: var(--gray); }
+  .sq-val { font-size: 1.3rem; font-weight: 800; color: #1e293b; }
+  .badge-pct { display: inline-block; padding: .15rem .5rem; border-radius: 999px; font-size: .7rem; font-weight: 700; margin-left: .4rem; vertical-align: middle; }
+  .badge-pct.green { background: #dcfce7; color: #16a34a; }
+  .badge-pct.yellow { background: #fef9c3; color: #a16207; }
+  .badge-pct.red { background: #fee2e2; color: #dc2626; }
+
+  /* Table section */
+  .table-toolbar { padding: .9rem 1.25rem; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
+  .table-toolbar input {
+    border: 1px solid #cbd5e1; border-radius: 8px; padding: .45rem .8rem;
+    font-size: .85rem; width: 220px; outline: none;
+  }
+  .table-toolbar input:focus { border-color: var(--blue); }
+  .tbl-btn { background: #f1f5f9; border: 1px solid #e2e8f0; color: #374151; padding: .4rem .85rem; border-radius: 8px; cursor: pointer; font-size: .82rem; font-weight: 600; }
+  .tbl-btn:hover { background: #e2e8f0; }
+  .tbl-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .83rem; min-width: 900px; }
+  thead th {
+    background: #f8fafc; padding: .6rem .85rem; text-align: left;
+    font-size: .7rem; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--gray); font-weight: 700; cursor: pointer; white-space: nowrap;
+    user-select: none; position: sticky; top: 0;
+  }
+  thead th:hover { background: #f1f5f9; }
+  thead th .sort-icon { opacity: .4; margin-left: .2rem; }
+  thead th.sorted .sort-icon { opacity: 1; color: var(--blue); }
+  tbody tr { border-top: 1px solid #f1f5f9; transition: background .1s; }
   tbody tr:hover { background: #f8fafc; }
-  td { padding: .75rem 1rem; vertical-align: middle; }
-  .badge { display: inline-block; padding: .2rem .6rem; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+  tbody tr.low-engagement { background: #fff5f5; }
+  tbody tr.low-engagement:hover { background: #fee2e2; }
+  td { padding: .6rem .85rem; vertical-align: middle; }
+
+  /* Badges */
+  .badge { display: inline-block; padding: .18rem .6rem; border-radius: 999px; font-size: .7rem; font-weight: 700; white-space: nowrap; }
   .badge.active { background: #dcfce7; color: #16a34a; }
   .badge.recent { background: #dbeafe; color: #1d4ed8; }
   .badge.stale { background: #fef9c3; color: #a16207; }
-  .badge.dead { background: #f1f5f9; color: #94a3b8; }
-  .mono { font-family: monospace; font-size: .8rem; color: #64748b; }
-  .num { font-weight: 600; color: #1e40af; }
+  .badge.churned { background: #ffedd5; color: #ea580c; }
+  .badge.never { background: #f1f5f9; color: #94a3b8; }
 
-  /* auth */
-  #auth-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #f0f4f8; }
-  .auth-box { background: white; border-radius: 16px; padding: 2.5rem 2rem; width: 340px; box-shadow: 0 4px 24px rgba(0,0,0,.12); }
-  .auth-box h2 { font-size: 1.2rem; font-weight: 700; margin-bottom: 1.5rem; color: #1e40af; }
-  .auth-box input { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: .65rem .9rem; font-size: .9rem; margin-bottom: 1rem; }
-  .auth-box button { width: 100%; background: #1e40af; color: white; border: none; border-radius: 8px; padding: .75rem; font-size: .95rem; font-weight: 600; cursor: pointer; }
+  /* Engagement bar */
+  .eng-wrap { display: flex; align-items: center; gap: .5rem; min-width: 100px; }
+  .eng-bar-bg { flex: 1; background: #e2e8f0; border-radius: 4px; height: 7px; overflow: hidden; }
+  .eng-bar { height: 7px; border-radius: 4px; }
+  .eng-num { font-size: .78rem; font-weight: 700; min-width: 24px; color: #475569; }
+
+  .mono { font-family: 'Consolas', monospace; font-size: .78rem; color: var(--gray); }
+  .num { font-weight: 700; color: #1e293b; }
+  .dim { color: #94a3b8; font-size: .78rem; }
+  a.ws-link { color: var(--blue); font-weight: 700; text-decoration: none; }
+  a.ws-link:hover { text-decoration: underline; }
+
+  /* Auth */
+  #auth-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .auth-box { background: white; border-radius: 16px; padding: 2.5rem 2rem; width: 340px; box-shadow: 0 8px 32px rgba(0,0,0,.12); }
+  .auth-box h2 { font-size: 1.3rem; font-weight: 800; margin-bottom: .4rem; color: var(--blue); }
+  .auth-box p { font-size: .82rem; color: var(--gray); margin-bottom: 1.5rem; }
+  .auth-box input { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: .65rem .9rem; font-size: .9rem; margin-bottom: .85rem; outline: none; }
+  .auth-box input:focus { border-color: var(--blue); }
+  .auth-box button { width: 100%; background: var(--blue); color: white; border: none; border-radius: 8px; padding: .75rem; font-size: .95rem; font-weight: 700; cursor: pointer; }
   .auth-box button:hover { background: #1d3a9e; }
-  .auth-error { color: #dc2626; font-size: .82rem; margin-top: .5rem; }
+  .auth-error { color: var(--red); font-size: .82rem; margin-top: .5rem; }
 
   #main-screen { display: none; }
-  .refresh-btn { background: #e2e8f0; border: none; padding: .4rem .9rem; border-radius: 8px; cursor: pointer; font-size: .82rem; font-weight: 600; color: #374151; }
-  .refresh-btn:hover { background: #cbd5e1; }
-  .loading { text-align: center; padding: 3rem; color: #94a3b8; }
+  .loading { text-align: center; padding: 3rem; color: #94a3b8; font-size: .9rem; }
+  .empty { padding: 2rem; text-align: center; color: var(--gray); font-size: .85rem; }
 </style>
 </head>
 <body>
 
+<!-- Auth Screen -->
 <div id="auth-screen">
   <div class="auth-box">
     <h2>MT Shift Admin</h2>
-    <input type="password" id="api-key-input" placeholder="API Key" />
+    <p>กรอก API Key เพื่อเข้าสู่ระบบ Analytics Dashboard</p>
+    <input type="password" id="api-key-input" placeholder="API Key" autocomplete="off" />
     <button onclick="login()">เข้าสู่ระบบ</button>
     <div class="auth-error" id="auth-error"></div>
   </div>
 </div>
 
+<!-- Main Screen -->
 <div id="main-screen">
   <header>
-    <h1>MT Shift — Admin Dashboard</h1>
-    <span id="updated-at"></span>
+    <h1>MT Shift &mdash; Admin Analytics</h1>
+    <span class="meta" id="updated-at"></span>
+    <label class="auto-refresh-label">
+      <input type="checkbox" id="auto-refresh-chk" onchange="toggleAutoRefresh()">
+      Auto-refresh 60s
+    </label>
+    <button class="header-btn" onclick="loadStats()">&#8635; Refresh</button>
+    <button class="header-btn green" onclick="exportCSV()">&#8659; Export CSV</button>
   </header>
+
   <div class="container">
-    <div class="kpi-grid" id="kpi-grid">
+    <!-- KPI Strip -->
+    <div class="kpi-strip" id="kpi-strip">
       <div class="loading">กำลังโหลด...</div>
     </div>
-    <div class="card">
-      <div class="card-header">
-        <h2>Workspace ทั้งหมด</h2>
-        <button class="refresh-btn" onclick="loadStats()">รีเฟรช</button>
+
+    <!-- Row: Funnel + Solver Quality -->
+    <div class="row2">
+      <div class="card">
+        <div class="card-header"><h2>Acquisition Funnel</h2></div>
+        <div class="card-body" id="funnel-body">
+          <div class="loading">กำลังโหลด...</div>
+        </div>
       </div>
-      <div id="table-wrap"><div class="loading">กำลังโหลด...</div></div>
+      <div class="card">
+        <div class="card-header"><h2>Solver Quality</h2></div>
+        <div class="card-body" id="solver-quality-body">
+          <div class="loading">กำลังโหลด...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Workspace Table -->
+    <div class="card" style="margin-bottom:2rem">
+      <div class="card-header">
+        <h2>Workspaces ทั้งหมด</h2>
+      </div>
+      <div class="table-toolbar">
+        <input type="search" id="search-input" placeholder="ค้นหา workspace..." oninput="renderTable()">
+        <button class="tbl-btn" onclick="loadStats()">&#8635; รีเฟรช</button>
+        <button class="tbl-btn" onclick="exportCSV()">&#8659; CSV</button>
+        <span id="row-count" style="font-size:.8rem;color:var(--gray);margin-left:auto"></span>
+      </div>
+      <div class="tbl-wrap">
+        <div id="table-wrap"><div class="loading">กำลังโหลด...</div></div>
+      </div>
     </div>
   </div>
 </div>
 
 <script>
 let _apiKey = "";
+let _data = null;
+let _sortState = { col: "engagement_score", dir: -1 };
+let _autoRefreshTimer = null;
 
+// ─── Auth ─────────────────────────────────────────────────────────────────────
 function login() {
   const key = document.getElementById("api-key-input").value.trim();
   if (!key) return;
@@ -95,116 +226,266 @@ function login() {
   document.getElementById("main-screen").style.display = "block";
   loadStats();
 }
+document.getElementById("api-key-input").addEventListener("keydown", e => { if (e.key === "Enter") login(); });
 
-document.getElementById("api-key-input").addEventListener("keydown", e => {
-  if (e.key === "Enter") login();
-});
-
+// ─── Load ─────────────────────────────────────────────────────────────────────
 async function loadStats() {
   try {
-    const r = await fetch("/api/admin/stats", {
-      headers: { "X-API-Key": _apiKey }
-    });
+    const r = await fetch("/api/admin/stats", { headers: { "X-API-Key": _apiKey } });
     if (r.status === 401 || r.status === 403) {
       document.getElementById("main-screen").style.display = "none";
       document.getElementById("auth-screen").style.display = "flex";
       document.getElementById("auth-error").textContent = "API Key ไม่ถูกต้อง";
       return;
     }
-    const d = await r.json();
-    renderKPI(d);
-    renderTable(d.workspaces || []);
+    _data = await r.json();
+    renderAll(_data);
     document.getElementById("updated-at").textContent = "อัพเดท " + new Date().toLocaleTimeString("th-TH");
   } catch (e) {
-    document.getElementById("table-wrap").innerHTML = `<div class="loading">โหลดไม่สำเร็จ: ${e.message}</div>`;
+    document.getElementById("table-wrap").innerHTML = `<div class="loading">โหลดไม่สำเร็จ: ${esc(e.message)}</div>`;
   }
 }
 
+function renderAll(d) {
+  renderKPI(d);
+  renderFunnel(d);
+  renderSolverQuality(d);
+  renderTable();
+}
+
+// ─── KPI Strip ────────────────────────────────────────────────────────────────
 function renderKPI(d) {
-  const grid = document.getElementById("kpi-grid");
+  const totalRuns = d.total_optimal_runs != null ? (d.total_optimal_runs + d.total_dummy_runs) : d.total_schedules_run;
+  const optPct = totalRuns > 0 ? Math.round(d.total_optimal_runs / totalRuns * 100) : 0;
+  const solveDisp = d.avg_solve_ms_global != null ? (d.avg_solve_ms_global / 1000).toFixed(1) + "s" : "—";
   const items = [
-    { label: "Workspaces ทั้งหมด", value: d.total_workspaces, sub: "แผนกที่สร้าง", cls: "" },
-    { label: "Active 30 วัน", value: d.active_30d, sub: `7 วัน: ${d.active_7d} แผนก`, cls: "green" },
-    { label: "ตารางที่สร้างแล้ว", value: d.total_schedules_run, sub: "ครั้ง", cls: "purple" },
-    { label: "บุคลากรทั้งหมด", value: d.total_staff_managed, sub: "คน (active)", cls: "orange" },
-    { label: "Manual Edits", value: d.total_manual_edits, sub: "slot ที่แก้มือ", cls: "" },
-    { label: "เวลาที่ประหยัดได้", value: `~${d.estimated_hours_saved}`, sub: "ชั่วโมง (ประมาณ)", cls: "green" },
+    { label: "Workspaces ทั้งหมด", value: d.total_workspaces, sub: "แผนกที่สร้าง", cls: "blue" },
+    { label: "Active 7 วัน", value: d.active_7d, sub: `${d.active_7d} / ${d.total_workspaces} WS`, cls: "green" },
+    { label: "Active 30 วัน", value: d.active_30d, sub: `${pct(d.active_30d, d.total_workspaces)}% ของทั้งหมด`, cls: "green" },
+    { label: "Activation Rate", value: (d.activation_rate ?? 0) + "%", sub: "มี ≥1 solver run", cls: "yellow" },
+    { label: "Total Solver Runs", value: d.total_schedules_run, sub: `avg ${d.avg_runs_per_workspace ?? 0} /WS`, cls: "blue" },
+    { label: "Optimal %", value: optPct + "%", sub: `${d.total_optimal_runs ?? 0} optimal runs`, cls: optPct >= 70 ? "green" : "yellow" },
+    { label: "Avg Solve Time", value: solveDisp, sub: "เฉลี่ยทุก workspace", cls: "gray" },
+    { label: "ชั่วโมงที่ประหยัด", value: "~" + d.estimated_hours_saved, sub: "ชม. (ประมาณ)", cls: "green" },
   ];
-  grid.innerHTML = items.map(i => `
+  document.getElementById("kpi-strip").innerHTML = items.map(i => `
     <div class="kpi ${i.cls}">
-      <div class="label">${i.label}</div>
-      <div class="value">${i.value}</div>
-      <div class="sub">${i.sub}</div>
+      <div class="kpi-label">${i.label}</div>
+      <div class="kpi-value">${i.value}</div>
+      <div class="kpi-sub">${i.sub}</div>
     </div>
   `).join("");
 }
 
-function activityBadge(last_accessed) {
-  if (!last_accessed) return '<span class="badge dead">ไม่เคยใช้</span>';
-  const days = Math.floor((Date.now() - new Date(last_accessed + "Z").getTime()) / 86400000);
-  if (days <= 7) return `<span class="badge active">Active (${days}วัน)</span>`;
-  if (days <= 30) return `<span class="badge recent">${days} วันที่แล้ว</span>`;
-  if (days <= 90) return `<span class="badge stale">${days} วันที่แล้ว</span>`;
-  return `<span class="badge dead">${days} วันที่แล้ว</span>`;
+// ─── Funnel ───────────────────────────────────────────────────────────────────
+function renderFunnel(d) {
+  const total = d.total_workspaces || 1;
+  const ws = d.workspaces || [];
+  const hasStaff = ws.filter(w => w.staff_count > 0).length;
+  const ranSolver = ws.filter(w => w.schedules_run > 0).length;
+  const active30 = d.active_30d || 0;
+  const steps = [
+    { label: "Created", count: d.total_workspaces, color: "#1e40af" },
+    { label: "Has Staff", count: hasStaff, color: "#0891b2" },
+    { label: "Ran Solver", count: ranSolver, color: "#16a34a" },
+    { label: "Active 30d", count: active30, color: "#d97706" },
+  ];
+  document.getElementById("funnel-body").innerHTML = steps.map(s => `
+    <div class="funnel-step">
+      <div class="funnel-label">
+        <span>${esc(s.label)}</span>
+        <span>${s.count} &nbsp;(${pct(s.count, total)}%)</span>
+      </div>
+      <div class="funnel-bar-bg">
+        <div class="funnel-bar" style="width:${pct(s.count, total)}%;background:${s.color}"></div>
+      </div>
+    </div>
+  `).join("");
 }
 
-function renderTable(ws) {
-  if (!ws.length) {
-    document.getElementById("table-wrap").innerHTML = '<div class="loading">ไม่มีข้อมูล</div>';
-    return;
-  }
-  // sort by last_accessed desc
-  ws.sort((a, b) => {
-    if (!a.last_accessed && !b.last_accessed) return 0;
-    if (!a.last_accessed) return 1;
-    if (!b.last_accessed) return -1;
-    return new Date(b.last_accessed) - new Date(a.last_accessed);
-  });
-  document.getElementById("table-wrap").innerHTML = `
-    <table>
-      <thead>
-        <tr>
-          <th>Workspace</th>
-          <th>สร้างเมื่อ</th>
-          <th>ใช้ล่าสุด</th>
-          <th>Status</th>
-          <th>บุคลากร</th>
-          <th>ตาราง</th>
-          <th>Optimal</th>
-          <th>มี Dummy</th>
-          <th>Avg Solve</th>
-          <th>Manual Edits</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${ws.map(w => `
-          <tr>
-            <td>
-              <a href="/w/${w.id}/" target="_blank" style="color:#1e40af;font-weight:600;text-decoration:none">${esc(w.name || "(ไม่มีชื่อ)")}</a><br>
-              <span class="mono">${w.id}</span>
-            </td>
-            <td style="color:#64748b;font-size:.8rem">${fmt(w.created_at)}</td>
-            <td style="color:#64748b;font-size:.8rem">${w.last_accessed ? fmt(w.last_accessed) : "—"}</td>
-            <td>${activityBadge(w.last_accessed)}</td>
-            <td class="num">${w.staff_count}</td>
-            <td class="num">${w.schedules_run}</td>
-            <td class="num">${w.optimal_runs ?? "—"}</td>
-            <td class="num">${w.dummy_runs ?? "—"}</td>
-            <td style="color:#64748b;font-size:.8rem">${w.avg_solve_ms != null ? (w.avg_solve_ms/1000).toFixed(1)+"s" : "—"}</td>
-            <td class="num">${w.manual_edits}</td>
-          </tr>
-        `).join("")}
-      </tbody>
-    </table>
+// ─── Solver Quality ───────────────────────────────────────────────────────────
+function renderSolverQuality(d) {
+  const total = d.total_schedules_run || 0;
+  const opt = d.total_optimal_runs ?? 0;
+  const dum = d.total_dummy_runs ?? 0;
+  const optPct = total > 0 ? Math.round(opt / total * 100) : 0;
+  const dumPct = total > 0 ? Math.round(dum / total * 100) : 0;
+  const solveDisp = d.avg_solve_ms_global != null ? (d.avg_solve_ms_global / 1000).toFixed(2) + "s" : "—";
+  const pctBadge = (p, good, warn) => {
+    const cls = p >= good ? "green" : p >= warn ? "yellow" : "red";
+    return `<span class="badge-pct ${cls}">${p}%</span>`;
+  };
+  document.getElementById("solver-quality-body").innerHTML = `
+    <div class="sq-row">
+      <span class="sq-key">Optimal Runs</span>
+      <span><span class="sq-val">${opt}</span>${pctBadge(optPct, 70, 40)}</span>
+    </div>
+    <div class="sq-row">
+      <span class="sq-key">Runs with Dummy Slots</span>
+      <span><span class="sq-val">${dum}</span>${pctBadge(dumPct, 0, 0)}</span>
+    </div>
+    <div class="sq-row">
+      <span class="sq-key">Avg Solve Time</span>
+      <span class="sq-val">${solveDisp}</span>
+    </div>
+    <div class="sq-row">
+      <span class="sq-key">Never Ran</span>
+      <span class="sq-val" style="color:var(--gray)">${d.never_ran_count ?? 0}</span>
+    </div>
+    <div class="sq-row">
+      <span class="sq-key">Churned (>30d + ran)</span>
+      <span class="sq-val" style="color:var(--orange)">${d.churned_count ?? 0}</span>
+    </div>
   `;
 }
 
-function fmt(dt) {
-  if (!dt) return "—";
-  try { return new Date(dt + (dt.includes("T") ? "" : "T00:00:00Z")).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }); }
-  catch { return dt; }
+// ─── Table ────────────────────────────────────────────────────────────────────
+const COLS = [
+  { key: "name",             label: "Workspace",        sortable: true },
+  { key: "created_at",       label: "สร้างเมื่อ",        sortable: true },
+  { key: "last_accessed",    label: "ใช้ล่าสุด",         sortable: true },
+  { key: "_status",          label: "Status",           sortable: false },
+  { key: "engagement_score", label: "Engagement",       sortable: true },
+  { key: "staff_count",      label: "Staff",            sortable: true },
+  { key: "schedules_run",    label: "Runs",             sortable: true },
+  { key: "optimal_pct",      label: "Optimal%",         sortable: true },
+  { key: "dummy_pct",        label: "Dummy%",           sortable: true },
+  { key: "avg_solve_ms",     label: "Avg Solve",        sortable: true },
+  { key: "manual_edits",     label: "Manual Edits",     sortable: true },
+  { key: "_action",          label: "",                 sortable: false },
+];
+
+function renderTable() {
+  if (!_data) return;
+  const ws = _data.workspaces || [];
+  const q = (document.getElementById("search-input")?.value || "").toLowerCase().trim();
+  let filtered = q ? ws.filter(w => (w.name || "").toLowerCase().includes(q) || (w.id || "").toLowerCase().includes(q)) : ws;
+
+  // sort
+  const { col, dir } = _sortState;
+  filtered = [...filtered].sort((a, b) => {
+    let av = a[col], bv = b[col];
+    if (col === "created_at" || col === "last_accessed") {
+      av = av ? new Date(av).getTime() : 0;
+      bv = bv ? new Date(bv).getTime() : 0;
+    }
+    if (av == null) av = col === "name" ? "" : -Infinity;
+    if (bv == null) bv = col === "name" ? "" : -Infinity;
+    if (typeof av === "string") return dir * av.localeCompare(bv);
+    return dir * (av - bv);
+  });
+
+  document.getElementById("row-count").textContent = `${filtered.length} / ${ws.length} workspaces`;
+
+  const thead = `<thead><tr>${COLS.map(c => {
+    const isSorted = _sortState.col === c.key;
+    const icon = isSorted ? (_sortState.dir === 1 ? "▲" : "▼") : "⇅";
+    const cls = isSorted ? " sorted" : "";
+    const onclick = c.sortable ? ` onclick="setSort('${c.key}')"` : "";
+    return `<th class="${cls}"${onclick}>${esc(c.label)}${c.sortable ? `<span class="sort-icon">${icon}</span>` : ""}</th>`;
+  }).join("")}</tr></thead>`;
+
+  const tbody = filtered.length === 0
+    ? `<tbody><tr><td colspan="${COLS.length}" class="empty">ไม่พบ workspace ที่ตรงกับการค้นหา</td></tr></tbody>`
+    : `<tbody>${filtered.map(w => rowHTML(w)).join("")}</tbody>`;
+
+  document.getElementById("table-wrap").innerHTML = `<table>${thead}${tbody}</table>`;
 }
-function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+function rowHTML(w) {
+  const status = statusBadge(w.last_accessed, w.schedules_run);
+  const score = w.engagement_score ?? 0;
+  const engColor = score >= 70 ? "#16a34a" : score >= 40 ? "#d97706" : "#dc2626";
+  const engBar = `
+    <div class="eng-wrap">
+      <div class="eng-bar-bg"><div class="eng-bar" style="width:${score}%;background:${engColor}"></div></div>
+      <span class="eng-num" style="color:${engColor}">${score}</span>
+    </div>`;
+  const lowEng = score < 30 ? " low-engagement" : "";
+  const solveDisp = w.avg_solve_ms != null ? (w.avg_solve_ms / 1000).toFixed(1) + "s" : "—";
+  return `<tr class="${lowEng}">
+    <td>
+      <a class="ws-link" href="/w/${esc(w.id)}/" target="_blank">${esc(w.name || "(ไม่มีชื่อ)")}</a><br>
+      <span class="mono">${esc(w.id)}</span>
+    </td>
+    <td class="dim">${fmtDate(w.created_at)}</td>
+    <td class="dim">${w.last_accessed ? fmtDate(w.last_accessed) : "—"}</td>
+    <td>${status}</td>
+    <td>${engBar}</td>
+    <td class="num">${w.staff_count}</td>
+    <td class="num">${w.schedules_run}</td>
+    <td class="num">${w.optimal_pct != null ? w.optimal_pct + "%" : "—"}</td>
+    <td class="num">${w.dummy_pct != null ? w.dummy_pct + "%" : "—"}</td>
+    <td class="dim">${solveDisp}</td>
+    <td class="num">${w.manual_edits}</td>
+    <td><a class="ws-link" href="/w/${esc(w.id)}/" target="_blank" style="font-size:.78rem">เปิด →</a></td>
+  </tr>`;
+}
+
+function statusBadge(last_accessed, schedules_run) {
+  if (!last_accessed && !schedules_run) return '<span class="badge never">Never Used</span>';
+  if (!last_accessed) return '<span class="badge never">Never Used</span>';
+  const days = Math.floor((Date.now() - new Date(last_accessed + (last_accessed.includes("T") ? "" : "T00:00:00Z")).getTime()) / 86400000);
+  if (days <= 7) return `<span class="badge active">Active (${days}d)</span>`;
+  if (days <= 30) return `<span class="badge recent">Recent (${days}d)</span>`;
+  if (schedules_run > 0) return `<span class="badge churned">Churned (${days}d)</span>`;
+  return `<span class="badge stale">Stale (${days}d)</span>`;
+}
+
+function setSort(col) {
+  if (_sortState.col === col) {
+    _sortState.dir *= -1;
+  } else {
+    _sortState.col = col;
+    _sortState.dir = col === "last_accessed" || col === "engagement_score" || col === "schedules_run" ? -1 : 1;
+  }
+  renderTable();
+}
+
+// ─── Export CSV ───────────────────────────────────────────────────────────────
+function exportCSV() {
+  if (!_data) return;
+  const ws = _data.workspaces || [];
+  const headers = ["id","name","created_at","last_accessed","staff_count","schedules_run",
+    "optimal_runs","optimal_pct","dummy_runs","dummy_pct","avg_solve_ms","manual_edits",
+    "engagement_score","total_solver_runs","avg_staff_at_run","time_to_first_run_days"];
+  const rows = [headers, ...ws.map(w => headers.map(h => {
+    const v = w[h];
+    if (v == null) return "";
+    const s = String(v);
+    return s.includes(",") || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+  }))];
+  const csv = rows.map(r => r.join(",")).join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `mt_shift_admin_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+// ─── Auto-refresh ─────────────────────────────────────────────────────────────
+function toggleAutoRefresh() {
+  const on = document.getElementById("auto-refresh-chk").checked;
+  clearInterval(_autoRefreshTimer);
+  if (on) _autoRefreshTimer = setInterval(loadStats, 60000);
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function pct(n, total) {
+  if (!total) return 0;
+  return Math.round(n / total * 100);
+}
+function fmtDate(dt) {
+  if (!dt) return "—";
+  try {
+    const d = new Date(dt + (dt.includes("T") ? "" : "T00:00:00Z"));
+    return d.toLocaleString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+  } catch { return dt; }
+}
+function esc(s) {
+  if (s == null) return "";
+  const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML;
+}
 </script>
 </body>
 </html>
