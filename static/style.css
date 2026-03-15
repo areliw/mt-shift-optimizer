@@ -408,6 +408,16 @@ body.app-layout {
   margin-left: -.25rem;
 }
 
+.form-section--highlight {
+  border-color: var(--accent);
+  background: var(--accent-pale);
+}
+
+.form-section--highlight legend {
+  color: var(--accent-2);
+  font-weight: 700;
+}
+
 /* ===== Buttons ===== */
 button {
   display: inline-flex;

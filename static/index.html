@@ -248,13 +248,21 @@
           </fieldset>
 
           <fieldset class="form-section">
-            <legend>จำนวนกะ / เดือน</legend>
+            <legend>จำนวนกะ / เดือน (รวม)</legend>
             <div class="form-inline" style="margin-bottom:0">
               <label for="staff_add_min_shifts">ขั้นต่ำ</label>
               <input type="number" id="staff_add_min_shifts" min="0" max="31" placeholder="—" style="width:5rem" />
               <label for="staff_add_max_shifts">สูงสุด</label>
               <input type="number" id="staff_add_max_shifts" min="0" max="31" placeholder="—" style="width:5rem" />
               <span class="text-muted" style="font-size:.82rem; margin:0">ว่างไว้ = ไม่จำกัด</span>
+            </div>
+          </fieldset>
+
+          <fieldset class="form-section form-section--highlight">
+            <legend>⚡ ขั้นต่ำ/สูงสุด รายกะ</legend>
+            <div class="form-group" style="margin-top:0">
+              <label class="text-muted" style="font-size:.82rem">บังคับ solver — เช่น ต้องอยู่เวรดึก X-match อย่างน้อย 3 ครั้ง/เดือน</label>
+              <div id="staff_add_shift_limits" class="staff-skills-checkboxes"></div>
             </div>
           </fieldset>
 
@@ -267,14 +275,6 @@
             <div class="form-group" style="margin-top:.5rem">
               <label class="text-muted" style="font-size:.82rem">กำหนดแยกตามกะ</label>
               <div id="staff_add_min_gap_rules" class="staff-skills-checkboxes"></div>
-            </div>
-          </fieldset>
-
-          <fieldset class="form-section">
-            <legend>ขั้นต่ำ/สูงสุด ต่อกะรายคน</legend>
-            <div class="form-group" style="margin-top:0">
-              <label class="text-muted" style="font-size:.82rem">เช่น เวรดึก xmatch</label>
-              <div id="staff_add_shift_limits" class="staff-skills-checkboxes"></div>
             </div>
           </fieldset>
 

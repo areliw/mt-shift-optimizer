@@ -926,13 +926,18 @@ function renderStaffDetailForm(staff, catalogSkills, catalogTitles, catalogTimeW
     "<div id=\"staff_edit_shift_day_rules\" class=\"shift-day-rules-list\"></div>" +
     "<button type=\"button\" id=\"staff_edit_shift_day_rule_add\" class=\"small shift-day-rules-add-btn\">+ เพิ่มกฎรายวัน</button>" +
     "</div></details>" +
-    "<fieldset class=\"form-section\"><legend>จำนวนกะ / เดือน</legend>" +
+    "<fieldset class=\"form-section\"><legend>จำนวนกะ / เดือน (รวม)</legend>" +
     "<div class=\"form-inline\" style=\"margin-bottom:0\">" +
     "<label for=\"staff_edit_min_shifts\">ขั้นต่ำ</label>" +
     "<input type=\"number\" id=\"staff_edit_min_shifts\" min=\"0\" max=\"31\" placeholder=\"—\" value=\"" + (staff.min_shifts_per_month != null ? staff.min_shifts_per_month : "") + "\" style=\"width:5rem\" />" +
     "<label for=\"staff_edit_max_shifts\">สูงสุด</label>" +
     "<input type=\"number\" id=\"staff_edit_max_shifts\" min=\"0\" max=\"31\" placeholder=\"—\" value=\"" + (staff.max_shifts_per_month != null ? staff.max_shifts_per_month : "") + "\" style=\"width:5rem\" />" +
     "<span class=\"text-muted\" style=\"font-size:.82rem;margin:0\">ว่างไว้ = ไม่จำกัด</span>" +
+    "</div></fieldset>" +
+    "<fieldset class=\"form-section form-section--highlight\"><legend>⚡ ขั้นต่ำ/สูงสุด รายกะ</legend>" +
+    "<div class=\"form-group\" style=\"margin-top:0\">" +
+    "<label class=\"text-muted\" style=\"font-size:.82rem\">บังคับ solver — เช่น ต้องอยู่เวรดึก X-match อย่างน้อย 3 ครั้ง/เดือน</label>" +
+    "<div id=\"staff_edit_shift_limits\" class=\"staff-skills-checkboxes\"></div>" +
     "</div></fieldset>" +
     "<fieldset class=\"form-section\"><legend>ห่างกันอย่างน้อย (วัน)</legend>" +
     "<div class=\"form-inline\" style=\"margin-bottom:0\">" +
@@ -942,11 +947,6 @@ function renderStaffDetailForm(staff, catalogSkills, catalogTitles, catalogTimeW
     "<div class=\"form-group\" style=\"margin-top:.5rem\">" +
     "<label class=\"text-muted\" style=\"font-size:.82rem\">กำหนดเว้นขั้นต่ำแยกตามกะ (ใส่ตัวเลขเฉพาะกะที่อยากจำกัด)</label>" +
     "<div id=\"staff_edit_min_gap_rules\" class=\"staff-skills-checkboxes\"></div>" +
-    "</div></fieldset>" +
-    "<fieldset class=\"form-section\"><legend>ขั้นต่ำ/สูงสุด ต่อกะรายคน</legend>" +
-    "<div class=\"form-group\" style=\"margin-top:0\">" +
-    "<label class=\"text-muted\" style=\"font-size:.82rem\">กำหนดเฉพาะกะที่ต้องคุม เช่น เวรดึก xmatch</label>" +
-    "<div id=\"staff_edit_shift_limits\" class=\"staff-skills-checkboxes\"></div>" +
     "</div></fieldset>" +
     "<fieldset class=\"form-section\"><legend>ทักษะ &amp; เวลา</legend>" +
     "<div class=\"form-group\" style=\"margin-top:0\"><label>ทักษะ</label><div id=\"staff_edit_skills\" class=\"staff-skills-checkboxes\">" +
