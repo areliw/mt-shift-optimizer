@@ -1428,18 +1428,62 @@ li .name { flex: 1; }
 .staff-time-windows-checkboxes {
   display: flex;
   flex-wrap: wrap;
-  gap: .4rem .875rem;
-  margin-top: .2rem;
+  gap: .375rem;
+  margin-top: .3rem;
 }
 
-.staff-skill-cb, .staff-day-cb {
+/* ── Pill/chip toggle ── */
+.staff-skill-cb,
+.staff-tw-cb,
+.staff-day-cb {
   display: inline-flex;
   align-items: center;
-  gap: .3rem;
-  font-size: .9rem;
-  font-weight: 400;
+  gap: 0;
   cursor: pointer;
+  user-select: none;
   white-space: nowrap;
+}
+
+.staff-skill-cb input[type="checkbox"],
+.staff-tw-cb input[type="checkbox"],
+.staff-day-cb input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* The visible pill — rendered from the text node after the hidden input */
+.staff-skill-cb,
+.staff-tw-cb,
+.staff-day-cb {
+  padding: .3rem .75rem;
+  font-size: .82rem;
+  font-weight: 500;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  transition: background .12s, border-color .12s, color .12s, box-shadow .12s;
+}
+
+.staff-skill-cb:hover,
+.staff-tw-cb:hover,
+.staff-day-cb:hover {
+  border-color: #94a3b8;
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.staff-skill-cb:has(input:checked),
+.staff-tw-cb:has(input:checked),
+.staff-day-cb:has(input:checked) {
+  background: #ecfdf5;
+  border-color: var(--accent);
+  color: var(--accent-2);
+  font-weight: 600;
+  box-shadow: 0 0 0 2px rgba(5,150,105,.1);
 }
 
 .staff-add-skills-wrap,
@@ -1589,10 +1633,8 @@ li .name { flex: 1; }
 }
 
 .shift-day-rule-checks .staff-skill-cb {
-  background: #f8fafc;
-  border: 1px solid var(--border-light);
-  border-radius: 999px;
-  padding: .2rem .45rem;
+  padding: .2rem .55rem;
+  font-size: .78rem;
 }
 
 @media (max-width: 640px) {
