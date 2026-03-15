@@ -1480,7 +1480,6 @@ function renderSchedule(data, staffList) {
   _lastStaffList = staffList || [];
   const meta = document.getElementById("schedule_meta");
   const wrap = document.getElementById("schedule_table_wrap");
-  const exportLink = document.getElementById("export_csv");
   const exportXlsx = document.getElementById("export_xlsx");
   const printBtn = document.getElementById("print_schedule");
   // Clear dummy warning banner ถ้ามี
@@ -1490,7 +1489,6 @@ function renderSchedule(data, staffList) {
   if (!data) {
     meta.textContent = "ยังไม่มีตาราง — กด \"สร้างตารางเวร\" เพื่อสร้าง";
     wrap.innerHTML = "";
-    exportLink.style.display = "none";
     if (exportXlsx) exportXlsx.style.display = "none";
     if (printBtn) printBtn.style.display = "none";
     return;
@@ -1505,8 +1503,6 @@ function renderSchedule(data, staffList) {
   const dummyCount = data.slots.filter((s) => s.is_dummy).length;
   const metaSuffix = dummyCount > 0 ? `  ⚠ ${dummyCount} ช่องยังว่าง` : "";
   meta.textContent = `Run #${runId} — สร้างเมื่อ ${data.created_at} (${displayDays} วัน)${dateRange ? " · " + dateRange : ""}${metaSuffix}`;
-  exportLink.href = API + "/schedule/export/csv?run_id=" + runId;
-  exportLink.style.display = "inline";
   if (exportXlsx) {
     exportXlsx.href = API + "/schedule/export/xlsx?run_id=" + runId;
     exportXlsx.style.display = "inline";

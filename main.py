@@ -1252,7 +1252,7 @@ def api_export_schedule_xlsx(run_id: int | None = None):
         row_num = day + 4
         if base:
             dt = base + timedelta(days=day)
-            date_label = f"{dt.day} {THAI_MONTHS_SHORT[dt.month-1]} {dt.year+543}"
+            date_label = str(dt.day)
             day_label = DAY_TH[dt.weekday()]
             is_weekend = dt.weekday() in WEEKEND
         else:
