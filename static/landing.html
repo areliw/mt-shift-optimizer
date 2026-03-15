@@ -368,7 +368,7 @@ function _renderWsList(el, items, limit) {
   const show = items.slice(0, limit);
   for (const w of show) {
     const href = '/w/' + w.id + '/#t=' + encodeURIComponent(w.tok);
-    const date = w.created_at ? new Date(w.created_at + (w.created_at.includes('T') ? '' : 'Z')).toLocaleDateString('th-TH') : '';
+    const date = w.created_at ? new Date(w.created_at.replace(' ', 'T') + (w.created_at.includes('T') || w.created_at.includes('+') ? '' : 'Z')).toLocaleDateString('th-TH') : '';
     const item = document.createElement('div');
     item.className = 'ws-item';
     const link = document.createElement('a');
