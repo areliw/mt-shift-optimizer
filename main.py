@@ -114,6 +114,8 @@ def _check_staff_off_day_warnings(staff_name: str, day: int) -> list[str]:
     return warnings
 
 # Initialize master DB (workspace registry) + migrate old data
+from database import MASTER_DB_PATH, WORKSPACES_DIR, DB_PATH
+logger.info("=== DB PATHS === MASTER=%s | WORKSPACES=%s | DB=%s", MASTER_DB_PATH, WORKSPACES_DIR, DB_PATH)
 init_master_db()
 
 app = FastAPI(title="MT Shift Optimizer")
