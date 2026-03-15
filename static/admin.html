@@ -221,7 +221,13 @@ let _autoRefreshTimer = null;
 function login() {
   const key = document.getElementById("api-key-input").value.trim();
   if (!key) return;
+  // HTTP headers ต้องเป็น ASCII เท่านั้น
+  if (!/^[\x00-\x7F]+$/.test(key)) {
+    document.getElementById("auth-error").textContent = "API Key ต้องเป็นตัวอักษรภาษาอังกฤษ/ตัวเลขเท่านั้น (ASCII)";
+    return;
+  }
   _apiKey = key;
+  document.getElementById("auth-error").textContent = "";
   document.getElementById("auth-screen").style.display = "none";
   document.getElementById("main-screen").style.display = "block";
   loadStats();
