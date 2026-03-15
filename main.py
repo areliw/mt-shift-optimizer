@@ -1584,7 +1584,7 @@ app.include_router(ws_router, prefix="/w/{workspace_id}")
 # ==========================================
 
 # --- Workspace management API ---
-@app.post("/api/workspaces", dependencies=[Depends(verify_api_key)])
+@app.post("/api/workspaces")
 def api_create_workspace(body: WorkspaceCreate = Body(WorkspaceCreate())):
     wid, token = create_workspace(body.name)
     logger.info("Created workspace id=%s name=%r", wid, body.name)
