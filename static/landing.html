@@ -361,6 +361,50 @@ function _getTokens() { try { return JSON.parse(localStorage.getItem('ws_tokens'
 function _saveTokens(t) { localStorage.setItem('ws_tokens', JSON.stringify(t)); }
 
 
+const _WS_PAGE = 5;
+function _renderWsList(el, items, limit) {
+  limit = limit || _WS_PAGE;
+  el.innerHTML = '<p class="ws-list-title">Workspace ของเครื่องนี้</p>';
+  const show = items.slice(0, limit);
+  for (const w of show) {
+    const href = '/w/' + w.id + '/#t=' + encodeURIComponent(w.tok);
+    const date = w.created_at ? new Date(w.created_at + (w.created_at.includes('T') ? '' : 'Z')).toLocaleDateString('th-TH') : '';
+    const item = document.createElement('div');
+    item.className = 'ws-item';
+    const link = document.createElement('a');
+    link.href = href;
+    link.style.cssText = 'text-decoration:none;color:inherit;flex:1;min-width:0';
+    link.innerHTML = '<div class="ws-name">' + escHtml(w.name) + '</div><div class="ws-date">' + date + '</div>';
+    const right = document.createElement('div');
+    right.className = 'ws-right';
+    if (w.deletable) {
+      const del = document.createElement('button');
+      del.className = 'ws-delete';
+      del.title = 'ลบ workspace';
+      del.innerHTML = '✕';
+      del.onclick = (e) => { e.preventDefault(); deleteWorkspace(w.id, w.name, w.tok); };
+      right.appendChild(del);
+    }
+    const arrow = document.createElement('a');
+    arrow.href = href;
+    arrow.className = 'ws-arrow';
+    arrow.style.cssText = 'text-decoration:none';
+    arrow.innerHTML = '&rarr;';
+    right.appendChild(arrow);
+    item.appendChild(link);
+    item.appendChild(right);
+    el.appendChild(item);
+  }
+  if (items.length > limit) {
+    const more = document.createElement('button');
+    more.className = 'btn-outline';
+    more.style.cssText = 'width:100%;margin-top:.5rem;font-size:.85rem';
+    more.textContent = 'แสดงเพิ่มเติม (' + (items.length - limit) + ' รายการ)';
+    more.onclick = () => _renderWsList(el, items, limit + _WS_PAGE);
+    el.appendChild(more);
+  }
+}
+
 async function loadWorkspaces() {
   try {
     const r = await fetch('/api/workspaces');
@@ -378,25 +422,8 @@ async function loadWorkspaces() {
         } catch {}
         return { id, name: 'Workspace ' + id, created_at: null, token: tokens[id] };
       }));
-      el.innerHTML = '<p class="ws-list-title">Workspace ของเครื่องนี้</p>';
-      for (const w of details) {
-        const href = '/w/' + w.id + '/#t=' + encodeURIComponent(w.token);
-        const date = w.created_at ? new Date(w.created_at + 'Z').toLocaleDateString('th-TH') : '';
-        const item = document.createElement('div');
-        item.className = 'ws-item';
-        const link = document.createElement('a');
-        link.href = href;
-        link.style.cssText = 'text-decoration:none;color:inherit;flex:1;min-width:0';
-        link.innerHTML = '<div class="ws-name">' + escHtml(w.name) + '</div><div class="ws-date">' + date + '</div>';
-        const arrow = document.createElement('a');
-        arrow.href = href;
-        arrow.className = 'ws-arrow';
-        arrow.style.cssText = 'text-decoration:none';
-        arrow.innerHTML = '&rarr;';
-        item.appendChild(link);
-        item.appendChild(arrow);
-        el.appendChild(item);
-      }
+      details.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+      _renderWsList(el, details.map(w => ({ ...w, tok: w.token, deletable: false })));
       return;
     }
     if (!r.ok) { document.getElementById('wsList').innerHTML = '<p class="empty-msg">โหลดไม่สำเร็จ (' + r.status + ')</p>'; return; }
@@ -412,36 +439,9 @@ async function loadWorkspaces() {
       el.innerHTML = '<p class="empty-msg">ยังไม่มี workspace ในเครื่องนี้ — สร้างใหม่ได้เลย</p>';
       return;
     }
-    el.innerHTML = '<p class="ws-list-title">Workspace ของเครื่องนี้</p>';
-    for (const ws of mine) {
-      const name = ws.name || ('Workspace ' + ws.id);
-      const date = ws.created_at ? new Date(ws.created_at + 'Z').toLocaleDateString('th-TH') : '';
-      const tok = tokens[ws.id] || '';
-      const href = '/w/' + ws.id + '/#t=' + encodeURIComponent(tok);
-      const item = document.createElement('div');
-      item.className = 'ws-item';
-      const link = document.createElement('a');
-      link.href = href;
-      link.style.cssText = 'text-decoration:none;color:inherit;flex:1;min-width:0';
-      link.innerHTML = '<div class="ws-name">' + escHtml(name) + '</div><div class="ws-date">' + date + '</div>';
-      const right = document.createElement('div');
-      right.className = 'ws-right';
-      const arrow = document.createElement('a');
-      arrow.href = href;
-      arrow.className = 'ws-arrow';
-      arrow.style.cssText = 'text-decoration:none';
-      arrow.innerHTML = '&rarr;';
-      const del = document.createElement('button');
-      del.className = 'ws-delete';
-      del.title = 'ลบ workspace';
-      del.innerHTML = '✕';
-      del.onclick = (e) => { e.preventDefault(); deleteWorkspace(ws.id, name, tok); };
-      right.appendChild(del);
-      right.appendChild(arrow);
-      item.appendChild(link);
-      item.appendChild(right);
-      el.appendChild(item);
-    }
+    const mapped = mine.map(ws => ({ id: ws.id, name: ws.name || ('Workspace ' + ws.id), created_at: ws.created_at, tok: tokens[ws.id] || '', deletable: true }));
+    mapped.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    _renderWsList(el, mapped);
   } catch(e) {
     document.getElementById('wsList').innerHTML = '<p class="empty-msg">โหลดไม่สำเร็จ</p>';
   }
