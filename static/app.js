@@ -3494,16 +3494,16 @@ document.getElementById("import_json_file").addEventListener("change", async (e)
 });
 
 // --- Print Schedule A4 ---
-// Shift color palette — cool tones, varied lightness for B&W distinction
+// Shift color palette — cool tones, light/faded
 const SHIFT_COLORS = [
-  { bg: "#dbeafe" }, // blue-100     gray ~89%
-  { bg: "#99f6e4" }, // teal-200     gray ~88%
-  { bg: "#c7d2fe" }, // indigo-200   gray ~84%
-  { bg: "#bae6fd" }, // sky-200      gray ~87%
-  { bg: "#ddd6fe" }, // violet-200   gray ~86%
-  { bg: "#a5f3fc" }, // cyan-200     gray ~90%
-  { bg: "#bbf7d0" }, // emerald-200  gray ~88%
-  { bg: "#e0e7ff" }, // indigo-100   gray ~89%
+  { bg: "#eff6ff" }, // blue-50
+  { bg: "#f0fdfa" }, // teal-50
+  { bg: "#eef2ff" }, // indigo-50
+  { bg: "#f0f9ff" }, // sky-50
+  { bg: "#faf5ff" }, // violet-50
+  { bg: "#ecfeff" }, // cyan-50
+  { bg: "#f0fdf4" }, // emerald-50
+  { bg: "#f5f3ff" }, // purple-50
 ];
 
 document.getElementById("print_schedule").addEventListener("click", () => {
