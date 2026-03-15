@@ -193,83 +193,89 @@
       </header>
       <section class="card">
         <h2>เพิ่มบุคลากร</h2>
-        <details class="staff-add-collapse" open>
-          <summary class="staff-add-collapse-summary">พับ/ขยายฟอร์มเพิ่มบุคลากร</summary>
-        <fieldset class="form-section">
-          <legend>ข้อมูลพื้นฐาน</legend>
-          <div class="form-inline">
-            <input type="text" id="staff_name" placeholder="ชื่อ-นามสกุล" aria-label="ชื่อ" style="min-width:10rem" />
-            <label for="staff_title_select">ตำแหน่ง</label>
-            <select id="staff_title_select" aria-label="ฉายา/ตำแหน่ง" style="min-width:10rem">
-              <option value="">— เลือก —</option>
+
+        <!-- ── Essential fields (always visible) ── -->
+        <div class="staff-essential">
+          <div class="staff-essential-row">
+            <input type="text" id="staff_name" placeholder="ชื่อ-นามสกุล" aria-label="ชื่อ" class="staff-name-input" />
+            <select id="staff_title_select" aria-label="ตำแหน่ง" class="staff-title-select">
+              <option value="">— ตำแหน่ง —</option>
             </select>
           </div>
-        </fieldset>
-        <fieldset class="form-section">
-          <legend>วันหยุด</legend>
-          <div class="form-group staff-off-days-of-month-wrap" style="margin-top:.5rem">
-            <div class="month-mode-toggle">
-              <label class="month-mode-label">
-                <input type="radio" name="staff_add_month_mode" value="off" checked /> ระบุวันหยุด
-              </label>
-              <label class="month-mode-label">
-                <input type="radio" name="staff_add_month_mode" value="work" /> ระบุวันทำงาน
-              </label>
+          <div class="staff-essential-row staff-essential-checks">
+            <div class="staff-essential-group">
+              <span class="staff-essential-label">ทักษะ</span>
+              <div id="staff_add_skills" class="staff-skills-checkboxes"></div>
             </div>
-            <label for="staff_add_off_days_of_month" id="staff_add_month_label">รายเดือน (วันที่)</label>
-            <input type="text" id="staff_add_off_days_of_month" class="staff-month-input" placeholder="คลิกเลือกวันที่จากปฏิทิน" aria-label="วันที่ของเดือน" readonly style="max-width:16rem" />
-            <div id="staff_add_month_hint" class="text-muted staff-month-help"></div>
-            <div id="staff_add_off_days_of_month_calendar"></div>
+            <div class="staff-essential-group">
+              <span class="staff-essential-label">ช่วงเวลาที่อยู่ได้</span>
+              <div id="staff_add_time_windows" class="staff-time-windows-checkboxes"></div>
+            </div>
           </div>
-        </fieldset>
-        <details class="form-section shift-day-rules-section shift-day-rules-collapse" open>
-          <summary class="shift-day-rules-summary">ข้อยกเว้นรายวันแยกกะ</summary>
-          <div class="form-group shift-day-rules-wrap" style="margin-top:0">
-            <label class="text-muted" style="font-size:.82rem">เช่น วันที่ 27 อนุญาตเฉพาะเวรบ่าย/ดึก (กะอื่นจะไม่ถูกจัดในวันนั้น)</label>
-            <div id="staff_add_shift_day_rules" class="shift-day-rules-list"></div>
-            <button type="button" id="staff_add_shift_day_rule_add" class="small shift-day-rules-add-btn">+ เพิ่มกฎรายวัน</button>
-          </div>
-        </details>
-        <fieldset class="form-section">
-          <legend>จำนวนกะ / เดือน</legend>
-          <div class="form-inline" style="margin-bottom:0">
-            <label for="staff_add_min_shifts">ขั้นต่ำ</label>
-            <input type="number" id="staff_add_min_shifts" min="0" max="31" placeholder="—" style="width:5rem" />
-            <label for="staff_add_max_shifts">สูงสุด</label>
-            <input type="number" id="staff_add_max_shifts" min="0" max="31" placeholder="—" style="width:5rem" />
-            <span class="text-muted" style="font-size:.82rem; margin:0">ว่างไว้ = ไม่จำกัด</span>
-          </div>
-        </fieldset>
-        <fieldset class="form-section">
-          <legend>ห่างกันอย่างน้อย (วัน)</legend>
-          <div class="form-inline" style="margin-bottom:0">
-            <input type="number" id="staff_add_min_gap" min="0" max="30" placeholder="—" style="width:5rem" />
-            <span class="text-muted" style="font-size:.82rem; margin:0">เช่น 6 = ห่างอย่างน้อย 6 วัน (≈1 ครั้ง/สัปดาห์)</span>
-          </div>
-          <div class="form-group" style="margin-top:.5rem">
-            <label class="text-muted" style="font-size:.82rem">กำหนดเว้นขั้นต่ำแยกตามกะ (ใส่ตัวเลขเฉพาะกะที่อยากจำกัด)</label>
-            <div id="staff_add_min_gap_rules" class="staff-skills-checkboxes"></div>
-          </div>
-        </fieldset>
-        <fieldset class="form-section">
-          <legend>ขั้นต่ำ/สูงสุด ต่อกะรายคน</legend>
-          <div class="form-group" style="margin-top:0">
-            <label class="text-muted" style="font-size:.82rem">กำหนดเฉพาะกะที่ต้องคุม เช่น เวรดึก xmatch</label>
-            <div id="staff_add_shift_limits" class="staff-skills-checkboxes"></div>
-          </div>
-        </fieldset>
-        <fieldset class="form-section">
-          <legend>ทักษะ &amp; เวลา</legend>
-          <div class="form-group staff-add-skills-wrap" style="margin-top:0">
-            <label>ทักษะ</label>
-            <div id="staff_add_skills" class="staff-skills-checkboxes"></div>
-          </div>
-          <div class="form-group staff-add-time-windows-wrap">
-            <label>ช่วงเวลาที่อยู่ได้</label>
-            <div id="staff_add_time_windows" class="staff-time-windows-checkboxes"></div>
-          </div>
-        </fieldset>
-        <button type="button" id="add_staff" class="btn-primary" style="margin-top:.75rem">+ เพิ่มบุคลากร</button>
+          <button type="button" id="add_staff" class="btn-primary btn-add-staff">+ เพิ่มบุคลากร</button>
+        </div>
+
+        <!-- ── Advanced fields (collapsed by default) ── -->
+        <details class="staff-advanced-collapse">
+          <summary class="staff-advanced-summary">ตั้งค่าเพิ่มเติม <span class="staff-advanced-hint">วันหยุด / จำนวนกะ / ข้อจำกัด</span></summary>
+
+          <fieldset class="form-section" style="margin-top:.75rem">
+            <legend>วันหยุด</legend>
+            <div class="form-group staff-off-days-of-month-wrap" style="margin-top:.5rem">
+              <div class="month-mode-toggle">
+                <label class="month-mode-label">
+                  <input type="radio" name="staff_add_month_mode" value="off" checked /> ระบุวันหยุด
+                </label>
+                <label class="month-mode-label">
+                  <input type="radio" name="staff_add_month_mode" value="work" /> ระบุวันทำงาน
+                </label>
+              </div>
+              <label for="staff_add_off_days_of_month" id="staff_add_month_label">รายเดือน (วันที่)</label>
+              <input type="text" id="staff_add_off_days_of_month" class="staff-month-input" placeholder="คลิกเลือกวันที่จากปฏิทิน" aria-label="วันที่ของเดือน" readonly style="max-width:16rem" />
+              <div id="staff_add_month_hint" class="text-muted staff-month-help"></div>
+              <div id="staff_add_off_days_of_month_calendar"></div>
+            </div>
+          </fieldset>
+
+          <fieldset class="form-section">
+            <legend>จำนวนกะ / เดือน</legend>
+            <div class="form-inline" style="margin-bottom:0">
+              <label for="staff_add_min_shifts">ขั้นต่ำ</label>
+              <input type="number" id="staff_add_min_shifts" min="0" max="31" placeholder="—" style="width:5rem" />
+              <label for="staff_add_max_shifts">สูงสุด</label>
+              <input type="number" id="staff_add_max_shifts" min="0" max="31" placeholder="—" style="width:5rem" />
+              <span class="text-muted" style="font-size:.82rem; margin:0">ว่างไว้ = ไม่จำกัด</span>
+            </div>
+          </fieldset>
+
+          <fieldset class="form-section">
+            <legend>ห่างกันอย่างน้อย (วัน)</legend>
+            <div class="form-inline" style="margin-bottom:0">
+              <input type="number" id="staff_add_min_gap" min="0" max="30" placeholder="—" style="width:5rem" />
+              <span class="text-muted" style="font-size:.82rem; margin:0">เช่น 6 = ห่างอย่างน้อย 6 วัน</span>
+            </div>
+            <div class="form-group" style="margin-top:.5rem">
+              <label class="text-muted" style="font-size:.82rem">กำหนดแยกตามกะ</label>
+              <div id="staff_add_min_gap_rules" class="staff-skills-checkboxes"></div>
+            </div>
+          </fieldset>
+
+          <fieldset class="form-section">
+            <legend>ขั้นต่ำ/สูงสุด ต่อกะรายคน</legend>
+            <div class="form-group" style="margin-top:0">
+              <label class="text-muted" style="font-size:.82rem">เช่น เวรดึก xmatch</label>
+              <div id="staff_add_shift_limits" class="staff-skills-checkboxes"></div>
+            </div>
+          </fieldset>
+
+          <details class="form-section shift-day-rules-section shift-day-rules-collapse">
+            <summary class="shift-day-rules-summary">ข้อยกเว้นรายวันแยกกะ</summary>
+            <div class="form-group shift-day-rules-wrap" style="margin-top:0">
+              <label class="text-muted" style="font-size:.82rem">เช่น วันที่ 27 อนุญาตเฉพาะเวรบ่าย/ดึก</label>
+              <div id="staff_add_shift_day_rules" class="shift-day-rules-list"></div>
+              <button type="button" id="staff_add_shift_day_rule_add" class="small shift-day-rules-add-btn">+ เพิ่มกฎรายวัน</button>
+            </div>
+          </details>
         </details>
       </section>
 

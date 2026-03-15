@@ -2360,6 +2360,93 @@ li .name { flex: 1; }
 .pair-shift-chip:hover { background: var(--accent-pale, #f0fdf4); border-color: var(--accent, #059669); }
 .pair-shift-chip:has(.pair-shift-cb:checked) { background: var(--accent-light, #d1fae5); border-color: var(--accent, #059669); }
 
+/* ── Staff form: essential ── */
+.staff-essential {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+
+.staff-essential-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  align-items: flex-start;
+}
+
+.staff-name-input {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.staff-title-select {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.staff-essential-checks {
+  gap: 1rem;
+}
+
+.staff-essential-group {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.staff-essential-label {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+
+.btn-add-staff {
+  align-self: flex-start;
+}
+
+/* ── Staff form: advanced collapse ── */
+.staff-advanced-collapse {
+  margin-top: .75rem;
+  border-top: 1px dashed var(--border-light);
+  padding-top: .5rem;
+}
+
+.staff-advanced-summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--muted);
+  padding: .3rem 0;
+  user-select: none;
+}
+
+.staff-advanced-summary::-webkit-details-marker { display: none; }
+
+.staff-advanced-summary::before {
+  content: "▸";
+  font-size: .8rem;
+  color: var(--muted);
+}
+
+.staff-advanced-collapse[open] .staff-advanced-summary::before {
+  content: "▾";
+}
+
+.staff-advanced-hint {
+  font-size: .78rem;
+  font-weight: 400;
+  color: #94a3b8;
+}
+
+/* ── Legacy (keep for edit panel) ── */
 .staff-add-collapse {
   border: 1px solid var(--border-light);
   border-radius: var(--radius-sm);
