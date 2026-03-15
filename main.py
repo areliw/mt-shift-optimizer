@@ -1114,9 +1114,18 @@ def api_export_schedule_xlsx(run_id: int | None = None):
         except ValueError:
             pass
 
-    # Build ordered columns
+    # Build ordered columns — use canonical shift/position order from list_shifts()
+    shifts_def = list_shifts()  # ordered as defined by user
+    shift_order: list = [sh["name"] for sh in shifts_def]
+    pos_order: dict = {}  # shift_name -> {pos -> index}
+    for sh in shifts_def:
+        pos_order[sh["name"]] = {
+            (p["name"] if isinstance(p, dict) else p): i
+            for i, p in enumerate(sh.get("positions") or [])
+        }
+
     seen_cols: dict = {}
-    shift_order: list = []  # preserve original shift order
+    col_key_order: dict = {}  # fallback insertion index for unknown shifts
     for s in slots:
         pos = s.get(pos_key) or s.get("room") or ""
         si = s.get("slot_index", 0)
@@ -1126,10 +1135,17 @@ def api_export_schedule_xlsx(run_id: int | None = None):
             if si > 0:
                 label += f" ({si+1})"
             seen_cols[key] = label
+            col_key_order[key] = len(col_key_order)
         if s["shift_name"] not in shift_order:
             shift_order.append(s["shift_name"])
-    # Sort col_keys so all positions of the same shift are consecutive
-    col_keys = sorted(seen_cols.keys(), key=lambda k: (shift_order.index(k[0]), k[1], k[2]))
+
+    def _col_sort_key(k):
+        sn, pos, si = k
+        s_idx = shift_order.index(sn) if sn in shift_order else 9999
+        p_idx = (pos_order.get(sn) or {}).get(pos, col_key_order.get(k, 9999))
+        return (s_idx, p_idx, si)
+
+    col_keys = sorted(seen_cols.keys(), key=_col_sort_key)
     col_headers = [seen_cols[k] for k in col_keys]
 
     # Map shift name → color index

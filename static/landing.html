@@ -3,170 +3,391 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MT Shift Optimizer</title>
+<title>Score UP Shifts! — ระบบจัดเวรอัตโนมัติ</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: #f0f2f5;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .container {
-    background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 2px 16px rgba(0,0,0,0.1);
-    padding: 40px;
-    max-width: 480px;
-    width: 100%;
-    text-align: center;
-  }
-  h1 { font-size: 1.6rem; color: #1a73e8; margin-bottom: 8px; }
-  .subtitle { color: #666; margin-bottom: 4px; font-size: 0.95rem; }
-  .subtitle-note { color: #999; margin-bottom: 28px; font-size: 0.85rem; }
-  .create-section { margin-bottom: 28px; }
-  .create-section input {
-    width: 100%;
-    padding: 12px 16px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    font-size: 1rem;
-    margin-bottom: 12px;
-    outline: none;
-  }
-  .create-section input:focus { border-color: #1a73e8; }
-  .btn-primary {
-    width: 100%;
-    padding: 12px;
-    background: #1a73e8;
-    color: #fff;
-    border: none;
-    border-radius: 8px;
-    font-size: 1rem;
-    cursor: pointer;
-    font-weight: 600;
-  }
-  .btn-primary:hover { background: #1557b0; }
-  .btn-primary:disabled { background: #aaa; cursor: not-allowed; }
-  .divider {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin: 24px 0;
-    color: #999;
-    font-size: 0.85rem;
-  }
-  .divider::before, .divider::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: #ddd;
-  }
-  .workspace-list { text-align: left; }
-  .workspace-list h3 { font-size: 0.95rem; color: #333; margin-bottom: 12px; }
-  .ws-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 14px;
-    border: 1px solid #e8e8e8;
-    border-radius: 8px;
-    margin-bottom: 8px;
-    text-decoration: none;
-    color: #333;
-    transition: background 0.15s;
-  }
-  .ws-item:hover { background: #f5f8ff; border-color: #1a73e8; }
-  .ws-name { font-weight: 500; }
-  .ws-date { font-size: 0.8rem; color: #999; }
-  .ws-arrow { color: #1a73e8; font-size: 1.2rem; }
-  .ws-delete {
-    background: none; border: none; color: #ccc; cursor: pointer;
-    font-size: 1.1rem; padding: 4px 8px; border-radius: 4px; transition: color 0.15s;
-  }
-  .ws-delete:hover { color: #e53935; }
-  .ws-right { display: flex; align-items: center; gap: 4px; }
-  .empty-msg { color: #999; font-size: 0.9rem; padding: 12px 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --blue: #4f7ef7;
+  --blue-dark: #3b6ee8;
+  --blue-light: #f0f5ff;
+  --text: #1e293b;
+  --muted: #64748b;
+  --border: #e2e8f0;
+  --radius: 12px;
+}
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #f8fafc;
+  color: var(--text);
+  min-height: 100vh;
+}
+
+/* ─── NAV ─── */
+nav {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  height: 56px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.nav-logo { font-weight: 700; font-size: 1.1rem; color: var(--blue); letter-spacing: -0.3px; }
+.nav-logo span { color: var(--text); }
+.nav-cta {
+  padding: 8px 20px; background: var(--blue); color: #fff;
+  border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600;
+  cursor: pointer; text-decoration: none; transition: background 0.15s;
+}
+.nav-cta:hover { background: var(--blue-dark); }
+
+/* ─── HERO ─── */
+.hero {
+  padding: 72px 24px 56px;
+  text-align: center;
+  background: linear-gradient(160deg, #eff6ff 0%, #f8fafc 60%);
+}
+.hero-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #dbeafe; color: var(--blue);
+  padding: 4px 14px; border-radius: 999px;
+  font-size: 0.8rem; font-weight: 600; margin-bottom: 20px;
+}
+.hero-badge::before { content: '✦'; font-size: 0.7rem; }
+h1 {
+  font-size: clamp(2rem, 5vw, 3rem);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -1px;
+  color: var(--text);
+  margin-bottom: 16px;
+}
+h1 em { font-style: normal; color: var(--blue); }
+.hero-sub {
+  font-size: 1.1rem; color: var(--muted);
+  max-width: 480px; margin: 0 auto 36px;
+  line-height: 1.7;
+}
+.hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.btn-hero {
+  padding: 14px 28px; background: var(--blue); color: #fff;
+  border: none; border-radius: 10px; font-size: 1rem; font-weight: 700;
+  cursor: pointer; text-decoration: none; transition: all 0.15s;
+  box-shadow: 0 4px 14px rgba(37,99,235,0.35);
+}
+.btn-hero:hover { background: var(--blue-dark); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(37,99,235,0.4); }
+.btn-ghost {
+  padding: 14px 28px; background: #fff; color: var(--text);
+  border: 1.5px solid var(--border); border-radius: 10px; font-size: 1rem; font-weight: 600;
+  cursor: pointer; text-decoration: none; transition: all 0.15s;
+}
+.btn-ghost:hover { border-color: var(--blue); color: var(--blue); }
+
+/* ─── STATS BAR ─── */
+.stats-bar {
+  display: flex; justify-content: center; gap: 0;
+  background: #fff; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.stat-item {
+  flex: 1; max-width: 200px;
+  padding: 20px 16px; text-align: center;
+  border-right: 1px solid var(--border);
+}
+.stat-item:last-child { border-right: none; }
+.stat-num { font-size: 1.6rem; font-weight: 800; color: var(--blue); }
+.stat-label { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+
+/* ─── FEATURES ─── */
+.features {
+  max-width: 960px; margin: 0 auto;
+  padding: 64px 24px;
+}
+.section-label {
+  text-align: center; font-size: 0.82rem; font-weight: 700;
+  color: var(--blue); letter-spacing: 1.5px; text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.section-title {
+  text-align: center; font-size: 1.8rem; font-weight: 800;
+  letter-spacing: -0.5px; margin-bottom: 40px;
+}
+.features-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px;
+}
+.feature-card {
+  background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 24px;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+.feature-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.08); transform: translateY(-2px); }
+.feature-icon {
+  width: 44px; height: 44px;
+  background: var(--blue-light); border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.3rem; margin-bottom: 14px;
+}
+.feature-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+.feature-card p { font-size: 0.875rem; color: var(--muted); line-height: 1.6; }
+
+/* ─── HOW IT WORKS ─── */
+.how { background: var(--blue-light); padding: 64px 24px; }
+.how-inner { max-width: 720px; margin: 0 auto; }
+.steps { display: flex; flex-direction: column; gap: 0; margin-top: 40px; }
+.step {
+  display: flex; gap: 20px; padding: 24px 0;
+  border-bottom: 1px solid #dbeafe;
+}
+.step:last-child { border-bottom: none; }
+.step-num {
+  width: 40px; height: 40px; flex-shrink: 0;
+  background: var(--blue); color: #fff;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 0.95rem;
+}
+.step-body h3 { font-size: 1rem; font-weight: 700; margin-bottom: 4px; }
+.step-body p { font-size: 0.875rem; color: var(--muted); line-height: 1.6; }
+
+/* ─── WORKSPACE PANEL ─── */
+.ws-panel {
+  max-width: 520px; margin: 0 auto;
+  padding: 64px 24px;
+}
+.panel-card {
+  background: #fff; border: 1px solid var(--border);
+  border-radius: 16px; padding: 36px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+}
+.panel-card h2 { font-size: 1.3rem; font-weight: 800; margin-bottom: 4px; }
+.panel-card .sub { font-size: 0.875rem; color: var(--muted); margin-bottom: 24px; }
+.field-group { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.field-group input {
+  padding: 12px 16px; border: 1.5px solid var(--border);
+  border-radius: 8px; font-size: 0.95rem; outline: none; transition: border-color 0.15s;
+}
+.field-group input:focus { border-color: var(--blue); }
+.btn-create {
+  width: 100%; padding: 13px; background: var(--blue); color: #fff;
+  border: none; border-radius: 8px; font-size: 0.95rem; font-weight: 700;
+  cursor: pointer; transition: background 0.15s;
+}
+.btn-create:hover { background: var(--blue-dark); }
+.btn-create:disabled { background: #94a3b8; cursor: not-allowed; }
+.divider {
+  display: flex; align-items: center; gap: 10px;
+  margin: 20px 0; font-size: 0.8rem; color: #94a3b8;
+}
+.divider::before,.divider::after { content:''; flex:1; height:1px; background: var(--border); }
+.ws-list-title { font-size: 0.82rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
+.ws-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 14px; border: 1.5px solid var(--border); border-radius: 8px;
+  margin-bottom: 8px; text-decoration: none; color: var(--text);
+  transition: all 0.15s;
+}
+.ws-item:hover { background: #f1f5ff; border-color: var(--blue); }
+.ws-name { font-weight: 600; font-size: 0.95rem; }
+.ws-date { font-size: 0.75rem; color: #94a3b8; margin-top: 1px; }
+.ws-right { display: flex; align-items: center; gap: 6px; }
+.ws-arrow { color: var(--blue); font-size: 1.1rem; text-decoration: none; }
+.ws-delete {
+  background: none; border: none; color: #cbd5e1; cursor: pointer;
+  font-size: 1rem; padding: 4px 6px; border-radius: 4px; transition: color 0.15s;
+  line-height: 1;
+}
+.ws-delete:hover { color: #ef4444; }
+.empty-msg { color: #94a3b8; font-size: 0.875rem; padding: 8px 0; }
+.run-count { text-align: center; font-size: 0.82rem; color: #94a3b8; margin-top: 12px; }
+
+/* ─── MOBILE ─── */
+@media (max-width: 600px) {
+  h1 { font-size: 1.9rem; letter-spacing: -0.5px; }
+  .hero { padding: 48px 20px 40px; }
+  .hero-sub { font-size: 1rem; }
+  .btn-hero, .btn-ghost { padding: 12px 20px; font-size: 0.95rem; width: 100%; text-align: center; }
+  .hero-actions { flex-direction: column; align-items: stretch; }
+  .stats-bar { flex-wrap: wrap; }
+  .stat-item { min-width: 50%; border-bottom: 1px solid var(--border); }
+  .stat-item:last-child { border-right: none; border-bottom: none; min-width: 100%; }
+  .features { padding: 40px 16px; }
+  .section-title { font-size: 1.4rem; }
+  .features-grid { grid-template-columns: 1fr; }
+  .how { padding: 40px 16px; }
+  .ws-panel { padding: 32px 16px; }
+  .panel-card { padding: 24px 20px; }
+  nav { padding: 0 16px; }
+}
+
+/* ─── FOOTER ─── */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 24px;
+  text-align: center;
+  font-size: 0.82rem;
+  color: #94a3b8;
+}
+footer a { color: var(--blue); text-decoration: none; }
 </style>
 </head>
 <body>
-<div class="container">
-  <h1>MT Shift Optimizer</h1>
-  <p class="subtitle">ระบบจัดเวรอัตโนมัติ สำหรับแผนก MT</p>
-  <p class="subtitle-note">ทุกคนจะเห็น workspace ของคุณ</p>
 
-  <div class="create-section">
-    <input type="text" id="wsName" placeholder="ชื่อ workspace (เช่น รพ.ของฉัน)" maxlength="100">
-    <button class="btn-primary" id="btnCreate" onclick="createWorkspace()">สร้าง Workspace ใหม่</button>
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">Score UP <span>Shifts!</span></div>
+  <a class="nav-cta" href="#get-started">เริ่มใช้งานฟรี</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge">สำหรับงาน MT &amp; บุคลากรสาธารณสุข</div>
+  <h1>จัดเวรยาก?<br>ให้ <em>AI จัดให้</em> ใน 30 วินาที</h1>
+  <p class="hero-sub">ระบบจัดตารางเวรอัตโนมัติ ยุติธรรม ตรงความต้องการ พร้อม export PDF &amp; Excel ทันที</p>
+  <div class="hero-actions">
+    <a class="btn-hero" href="#get-started">สร้าง Workspace ฟรี</a>
+    <a class="btn-ghost" href="#how">ดูวิธีใช้งาน</a>
   </div>
+</section>
 
-  <div class="divider">หรือเลือก workspace ที่มีอยู่</div>
-
-  <div class="workspace-list" id="wsList">
-    <p class="empty-msg">กำลังโหลด...</p>
+<!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="stat-item">
+    <div class="stat-num">≤ 30 วิ</div>
+    <div class="stat-label">จัดตารางเสร็จ</div>
   </div>
-
-  <div id="scheduleRunCount" style="margin-top:20px;font-size:0.88rem;color:#666;"></div>
-
-  <div style="margin-top:28px;padding-top:16px;border-top:1px solid #eee;font-size:0.85rem;color:#999;">
-    พบปัญหา / แจ้งบัค / ติดต่อ:
-    <a href="mailto:areliw11111@gmail.com" style="color:#1a73e8;text-decoration:none;">areliw11111@gmail.com</a>
+  <div class="stat-item">
+    <div class="stat-num">100%</div>
+    <div class="stat-label">ฟรี ไม่มีค่าใช้จ่าย</div>
+  </div>
+  <div class="stat-item">
+    <div class="stat-num">ยุติธรรม</div>
+    <div class="stat-label">กระจายเวรด้วย AI</div>
   </div>
 </div>
 
+<!-- FEATURES -->
+<section class="features">
+  <p class="section-label">ทำไมต้อง Score UP Shifts!</p>
+  <h2 class="section-title">ครบทุกอย่างที่ห้องแล็บต้องการ</h2>
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon">🤖</div>
+      <h3>AI Optimizer</h3>
+      <p>ใช้ OR-Tools CP-SAT หาตารางที่ดีที่สุดอัตโนมัติ — กระจายเวรยุติธรรม ตามทักษะ ตามข้อกำหนด</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">✏️</div>
+      <h3>แก้ไขได้ทันที</h3>
+      <p>คลิกช่องไหนก็ได้เพื่อเปลี่ยนคน ระบบจำการแก้ไขไว้โดยอัตโนมัติ</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📊</div>
+      <h3>Export PDF &amp; Excel</h3>
+      <p>พิมพ์ตารางสวยๆ A4 หรือดาวน์โหลด Excel พร้อมหัวตารางสีสัน ใช้ส่งฝ่ายบริหารได้เลย</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🏥</div>
+      <h3>รองรับหลายแผนก</h3>
+      <p>ตั้งกะ ตำแหน่ง ทักษะ วันหยุด และกฎเฉพาะได้เองอย่างยืดหยุ่น</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔒</div>
+      <h3>Workspace แยกกัน</h3>
+      <p>แต่ละโรงพยาบาลมีข้อมูลแยกกันสมบูรณ์ ปลอดภัย ไม่ปนกัน</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">⚡</div>
+      <h3>ใช้งานทันที</h3>
+      <p>ไม่ต้องติดตั้ง ไม่ต้อง login สร้าง workspace แล้วเริ่มได้เลย</p>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how" id="how">
+  <div class="how-inner">
+    <p class="section-label">วิธีใช้งาน</p>
+    <h2 class="section-title">3 ขั้นตอน พร้อมตารางเวร</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h3>สร้าง Workspace &amp; ตั้งค่า</h3>
+          <p>ใส่ชื่อโรงพยาบาล เพิ่มบุคลากร ตั้งกะเวร และกำหนดวันหยุดราชการ</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h3>กด "สร้างตาราง"</h3>
+          <p>AI จัดตารางให้อัตโนมัติใน 30 วินาที กระจายเวรยุติธรรม ตามทักษะ ตามกฎที่ตั้งไว้</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h3>ตรวจสอบ แก้ไข &amp; Export</h3>
+          <p>คลิกแก้ไขช่องที่ต้องการ แล้ว print A4 หรือดาวน์โหลด Excel ได้เลย</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- WORKSPACE PANEL -->
+<section class="ws-panel" id="get-started">
+  <div class="panel-card">
+    <h2>เริ่มใช้งาน</h2>
+    <p class="sub">สร้าง workspace ใหม่ หรือเปิด workspace ที่มีอยู่ในเครื่องนี้</p>
+
+    <div class="field-group">
+      <input type="text" id="wsName" placeholder="ชื่อโรงพยาบาล / แผนก (เช่น รพ.ของฉัน)" maxlength="100">
+    </div>
+    <button class="btn-create" id="btnCreate" onclick="createWorkspace()">+ สร้าง Workspace ใหม่</button>
+
+    <div class="divider">หรือเปิด workspace เดิม</div>
+
+    <div id="wsList"><p class="empty-msg">กำลังโหลด...</p></div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  พบปัญหา / แจ้งบัค / ติดต่อ:
+  <a href="mailto:areliw11111@gmail.com">areliw11111@gmail.com</a>
+  &nbsp;·&nbsp; Score UP Shifts! © 2025
+</footer>
+
 <script>
-// ws_tokens: { workspaceId: token, ... } stored per browser
 function _getTokens() { try { return JSON.parse(localStorage.getItem('ws_tokens') || '{}'); } catch { return {}; } }
 function _saveTokens(t) { localStorage.setItem('ws_tokens', JSON.stringify(t)); }
 
-async function loadScheduleRunCount() {
-  try {
-    const r = await fetch('/api/stats/schedule-runs');
-    if (!r.ok) return;
-    const d = await r.json();
-    const total = d.total != null ? Number(d.total) : 0;
-    const el = document.getElementById('scheduleRunCount');
-    if (el) el.textContent = 'สร้างตารางเวรไปแล้ว ' + total.toLocaleString('th-TH') + ' ครั้ง (รวมทั้งหมด)';
-  } catch(e) {}
-}
 
 async function loadWorkspaces() {
-  loadScheduleRunCount();
   try {
     const r = await fetch('/api/workspaces');
-    if (!r.ok) { document.getElementById('wsList').innerHTML = '<p class="empty-msg">โหลดไม่สำเร็จ ('+r.status+')</p>'; return; }
+    if (!r.ok) { document.getElementById('wsList').innerHTML = '<p class="empty-msg">โหลดไม่สำเร็จ (' + r.status + ')</p>'; return; }
     const list = await r.json();
     const tokens = _getTokens();
-
-    // ถ้า server ส่ง token มาด้วย (dev mode) → sync เข้า localStorage ทั้งหมด
     for (const ws of list) {
-      if (ws.token && !tokens[ws.id]) {
-        tokens[ws.id] = ws.token;
-      }
+      if (ws.token && !tokens[ws.id]) tokens[ws.id] = ws.token;
     }
     _saveTokens(tokens);
-
-    // แสดงเฉพาะ workspace ที่เครื่องนี้มี token
     const mine = list.filter(ws => tokens[ws.id]);
     const el = document.getElementById('wsList');
     if (!mine.length) {
       el.innerHTML = '<p class="empty-msg">ยังไม่มี workspace ในเครื่องนี้ — สร้างใหม่ได้เลย</p>';
       return;
     }
-    el.innerHTML = '<h3>Workspace ของเครื่องนี้</h3>';
+    el.innerHTML = '<p class="ws-list-title">Workspace ของเครื่องนี้</p>';
     for (const ws of mine) {
       const name = ws.name || ('Workspace ' + ws.id);
       const date = ws.created_at ? new Date(ws.created_at + 'Z').toLocaleDateString('th-TH') : '';
       const tok = tokens[ws.id] || '';
-      // ใส่ token ใน hash เพื่อให้หน้า workspace อ่านได้ถ้า localStorage หาย
       const href = '/w/' + ws.id + '/#t=' + encodeURIComponent(tok);
       const item = document.createElement('div');
       item.className = 'ws-item';
       const link = document.createElement('a');
       link.href = href;
-      link.style.cssText = 'text-decoration:none;color:inherit;flex:1';
+      link.style.cssText = 'text-decoration:none;color:inherit;flex:1;min-width:0';
       link.innerHTML = '<div class="ws-name">' + escHtml(name) + '</div><div class="ws-date">' + date + '</div>';
       const right = document.createElement('div');
       right.className = 'ws-right';
@@ -175,6 +396,12 @@ async function loadWorkspaces() {
       arrow.className = 'ws-arrow';
       arrow.style.cssText = 'text-decoration:none';
       arrow.innerHTML = '&rarr;';
+      const del = document.createElement('button');
+      del.className = 'ws-delete';
+      del.title = 'ลบ workspace';
+      del.innerHTML = '✕';
+      del.onclick = (e) => { e.preventDefault(); deleteWorkspace(ws.id, name, tok); };
+      right.appendChild(del);
       right.appendChild(arrow);
       item.appendChild(link);
       item.appendChild(right);
@@ -194,10 +421,9 @@ async function createWorkspace() {
     const r = await fetch('/api/workspaces', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: nameInput.value.trim()})
+      body: JSON.stringify({ name: nameInput.value.trim() })
     });
     const data = await r.json();
-    // บันทึก token ลง localStorage ของเครื่องนี้
     const tokens = _getTokens();
     tokens[data.id] = data.token;
     _saveTokens(tokens);
@@ -205,7 +431,7 @@ async function createWorkspace() {
   } catch(e) {
     alert('สร้าง workspace ไม่สำเร็จ');
     btn.disabled = false;
-    btn.textContent = 'สร้าง Workspace ใหม่';
+    btn.textContent = '+ สร้าง Workspace ใหม่';
   }
 }
 
@@ -217,7 +443,6 @@ async function deleteWorkspace(id, name, token) {
       headers: {'X-Workspace-Token': token || ''}
     });
     if (!r.ok) throw new Error(r.status);
-    // ลบ token ออกจาก localStorage ด้วย
     const tokens = _getTokens();
     delete tokens[id];
     _saveTokens(tokens);
