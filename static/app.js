@@ -2146,11 +2146,11 @@ function renderSkillList(skills) {
             `<span class="skill-level-tag" data-skill="${escapeHtml(name)}" data-level="${l.level}">${escapeHtml(l.label)} <button type="button" class="skill-level-x" title="ลบระดับนี้">&times;</button></span>`
           ).join('<span class="skill-level-arrow">&rarr;</span>')
         : '<span class="text-muted" style="font-size:.82rem">ยังไม่มีระดับ</span>';
-      return `<li class="skill-list-item skill-item-card" data-skill="${escapeHtml(name)}">
+      return `<li class="catalog-list-item skill-item-card" data-skill="${escapeHtml(name)}">
           <div class="skill-item-header">
             <span class="skill-name">${escapeHtml(name)}</span>
             <button type="button" class="small btn-edit-skill" data-name="${escapeHtml(name)}" title="แก้ไขชื่อ">แก้ไข</button>
-            <button type="button" class="small btn-delete-skill" data-name="${escapeHtml(name)}" title="ลบทักษะ">ลบ</button>
+            <button type="button" class="catalog-item-del btn-delete-skill" data-name="${escapeHtml(name)}" title="ลบทักษะ">&times;</button>
           </div>
           <div class="skill-levels-row">
             <span class="skill-levels-label">ระดับ:</span>
@@ -2321,9 +2321,10 @@ function renderTitleList(titles) {
   ul.innerHTML = list
     .map(
       (t) =>
-        `<li class="skill-list-item">
-          <span class="skill-name">${escapeHtml(t.name)} <span class="text-muted">(${t.type === "parttime" ? "พาร์ทไทม์" : "เต็มเวลา"})</span></span>
-          <button type="button" class="small btn-delete-title" data-name="${escapeHtml(t.name)}" title="ลบ">ลบ</button>
+        `<li class="catalog-list-item">
+          <span class="catalog-item-name">${escapeHtml(t.name)}</span>
+          <span class="catalog-item-badge">${t.type === "parttime" ? "พาร์ท" : "เต็มเวลา"}</span>
+          <button type="button" class="catalog-item-del btn-delete-title" data-name="${escapeHtml(t.name)}" title="ลบ">&times;</button>
         </li>`
     )
     .join("");
@@ -2397,10 +2398,10 @@ function renderTimeWindowList(list) {
   ul.innerHTML = (list || [])
     .map(
       (tw) =>
-        `<li class="skill-list-item">
-          <span class="skill-name">${escapeHtml(tw.name)}</span>
-          <span class="text-muted" style="font-size:0.85rem"> (${escapeHtml(tw.start_time || "")}–${escapeHtml(tw.end_time || "")})</span>
-          <button type="button" class="small btn-delete-skill" data-name="${escapeHtml(tw.name)}" title="ลบช่วงเวลา">ลบ</button>
+        `<li class="catalog-list-item">
+          <span class="catalog-item-name">${escapeHtml(tw.name)}</span>
+          <span class="catalog-item-badge">${escapeHtml(tw.start_time||"")}–${escapeHtml(tw.end_time||"")}</span>
+          <button type="button" class="catalog-item-del btn-delete-skill" data-name="${escapeHtml(tw.name)}" title="ลบ">&times;</button>
         </li>`
     )
     .join("");

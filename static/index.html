@@ -148,41 +148,53 @@
       <header class="page-header">
         <h1>ทักษะ &amp; ช่วงเวลา</h1>
       </header>
-      <section id="skills" class="card">
-        <h2>ทักษะ</h2>
-        <p class="text-muted">เพิ่มทักษะที่นี่ แล้วกำหนดให้บุคลากรในหน้าบุคลากร</p>
-        <div class="form-inline" style="margin-bottom:1rem">
-          <input type="text" id="skill_name" placeholder="ชื่อทักษะ เช่น เจาะเลือด" aria-label="ชื่อทักษะ" style="min-width:12rem" />
-          <button type="button" id="add_skill" class="btn-primary">+ เพิ่ม</button>
+      <section class="card catalog-card">
+        <div class="catalog-grid">
+
+          <!-- ทักษะ -->
+          <div class="catalog-section" id="skills">
+            <div class="catalog-section-head">
+              <span class="catalog-section-title">ทักษะ</span>
+            </div>
+            <div class="catalog-add-row">
+              <input type="text" id="skill_name" placeholder="เพิ่มทักษะ..." aria-label="ชื่อทักษะ" />
+              <button type="button" id="add_skill" class="btn-primary btn-add-inline">+</button>
+            </div>
+            <ul id="skill_list" class="catalog-list"></ul>
+          </div>
+
+          <!-- ฉายา / ตำแหน่ง -->
+          <div class="catalog-section" id="titles">
+            <div class="catalog-section-head">
+              <span class="catalog-section-title">ตำแหน่ง</span>
+            </div>
+            <div class="catalog-add-row">
+              <input type="text" id="title_name" placeholder="เพิ่มตำแหน่ง..." aria-label="ชื่อฉายา" />
+              <select id="title_type" aria-label="ประเภท" class="title-type-select">
+                <option value="fulltime">เต็มเวลา</option>
+                <option value="parttime">พาร์ทไทม์</option>
+              </select>
+              <button type="button" id="add_title" class="btn-primary btn-add-inline">+</button>
+            </div>
+            <ul id="title_list" class="catalog-list"></ul>
+          </div>
+
+          <!-- ช่วงเวลา -->
+          <div class="catalog-section" id="time_windows">
+            <div class="catalog-section-head">
+              <span class="catalog-section-title">ช่วงเวลา</span>
+            </div>
+            <div class="catalog-add-row">
+              <input type="text" id="time_window_start" placeholder="06:30" aria-label="เวลาเริ่ม" style="width:5rem" />
+              <span class="catalog-sep">–</span>
+              <input type="text" id="time_window_end" placeholder="12:00" aria-label="เวลาสิ้นสุด" style="width:5rem" />
+              <input type="text" id="time_window_name" placeholder="ชื่อ (ไม่บังคับ)" aria-label="ชื่อช่วงเวลา" style="flex:1;min-width:6rem" />
+              <button type="button" id="add_time_window" class="btn-primary btn-add-inline">+</button>
+            </div>
+            <ul id="time_window_list" class="catalog-list"></ul>
+          </div>
+
         </div>
-        <ul id="skill_list" class="skill-list"></ul>
-      </section>
-      <section id="titles" class="card">
-        <h2>ฉายา / ตำแหน่ง</h2>
-        <p class="text-muted">เช่น MT เต็มเวลา, พาร์ทไทม์ — กำหนดประเภทของแต่ละตำแหน่ง</p>
-        <div class="form-inline" style="margin-bottom:1rem">
-          <input type="text" id="title_name" placeholder="ชื่อฉายา เช่น MT เต็มเวลา" aria-label="ชื่อฉายา" style="min-width:10rem" />
-          <select id="title_type" aria-label="ประเภท">
-            <option value="fulltime">เต็มเวลา</option>
-            <option value="parttime">พาร์ทไทม์</option>
-          </select>
-          <button type="button" id="add_title" class="btn-primary">+ เพิ่ม</button>
-        </div>
-        <ul id="title_list" class="skill-list"></ul>
-      </section>
-      <section id="time_windows" class="card">
-        <h2>ช่วงเวลา</h2>
-        <p class="text-muted">กำหนดช่วงเวลาสำหรับกะและบุคลากร</p>
-        <div class="form-inline" style="margin-bottom:1rem">
-          <label for="time_window_start">เริ่ม</label>
-          <input type="text" id="time_window_start" placeholder="06:30" aria-label="เวลาเริ่ม" style="width:5.5rem" />
-          <label for="time_window_end">ถึง</label>
-          <input type="text" id="time_window_end" placeholder="12:00" aria-label="เวลาสิ้นสุด" style="width:5.5rem" />
-          <label for="time_window_name">ชื่อ (ไม่บังคับ)</label>
-          <input type="text" id="time_window_name" placeholder="ชื่อ หรือจะใช้เวลาเป็นชื่อ" aria-label="ชื่อช่วงเวลา" style="min-width:10rem" />
-          <button type="button" id="add_time_window" class="btn-primary">+ เพิ่ม</button>
-        </div>
-        <ul id="time_window_list" class="skill-list"></ul>
       </section>
     </div>
 
