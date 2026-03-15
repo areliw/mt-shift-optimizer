@@ -748,13 +748,16 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
         mx = mt.get("max_shifts_per_month")
         if mn and int(mn) > 0:
             mn_val = int(mn)
+            # Hard lower bound — solver ต้องถึง min จริงๆ (ไม่ใช่ soft)
+            model.add(total >= mn_val)
+            # Soft shortfall ไว้ใช้กับ objective ด้วย (กัน solver ให้บีบคนอื่นแทน)
             shortfall = model.new_int_var(0, mn_val, f"min_month_short_{mt['name']}")
             model.add(shortfall >= mn_val - total)
             min_shift_penalty_terms.append(shortfall)
         if mx and int(mx) > 0:
             model.add(total <= int(mx))
 
-        # min/max ต่อกะรายคน — min = soft, max = hard
+        # min/max ต่อกะรายคน — min = hard, max = hard
         shift_limits = mt.get("shift_limits") or {}
         if isinstance(shift_limits, dict):
             for shift_name, lim in shift_limits.items():
@@ -778,6 +781,7 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
                     continue
                 shift_total = sum(shift_terms)
                 if smin is not None and smin > 0:
+                    model.add(shift_total >= smin)
                     sl_short = model.new_int_var(0, smin, f"sl_short_{mt['name']}_{shift_name}")
                     model.add(sl_short >= smin - shift_total)
                     min_shift_penalty_terms.append(sl_short)
