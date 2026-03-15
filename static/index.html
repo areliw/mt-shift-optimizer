@@ -122,15 +122,34 @@
       <section class="card card-step card-home card-home-pair">
         <h2><svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>จับคู่บุคลากร</h2>
         <p class="text-muted" style="margin:0 0 .75rem 0">กำหนดว่าใครอยากอยู่ด้วยกัน หรือห้ามอยู่ด้วยกัน</p>
-        <div class="form-inline" style="margin-bottom:.75rem; flex-wrap:wrap; gap:.5rem; align-items:flex-start">
-          <select id="pair_staff_1" style="min-width:8rem"><option value="">-- คนที่ 1 --</option></select>
-          <select id="pair_type" style="min-width:9rem">
-            <option value="together">อยู่ด้วยกัน</option>
-            <option value="apart">ห้ามอยู่ด้วยกัน</option>
-            <option value="depends_on">คนที่ 2 ต้องอยู่กับ คนที่ 1</option>
-          </select>
-          <select id="pair_staff_2" style="min-width:8rem"><option value="">-- คนที่ 2 --</option></select>
-          <div class="pair-shifts-wrap" style="display:flex; align-items:center; gap:.5rem; flex-wrap:wrap">
+        <div style="margin-bottom:.75rem">
+          <!-- แถวหลัก: เลือกประเภท -->
+          <div class="form-inline" style="flex-wrap:wrap; gap:.5rem; align-items:center; margin-bottom:.5rem">
+            <select id="pair_type" style="min-width:9rem">
+              <option value="together">อยู่ด้วยกัน</option>
+              <option value="apart">ห้ามอยู่ด้วยกัน</option>
+              <option value="depends_on">ต้องอยู่กับ (OR)</option>
+            </select>
+          </div>
+          <!-- โหมด together/apart -->
+          <div id="pair_mode_normal" class="form-inline" style="flex-wrap:wrap; gap:.5rem; align-items:center; margin-bottom:.5rem">
+            <select id="pair_staff_1" style="min-width:8rem"><option value="">-- คนที่ 1 --</option></select>
+            <span style="color:var(--text-muted); font-size:.85rem">กับ</span>
+            <select id="pair_staff_2" style="min-width:8rem"><option value="">-- คนที่ 2 --</option></select>
+          </div>
+          <!-- โหมด depends_on: ผู้ต้องการ + providers (OR) -->
+          <div id="pair_mode_depends" style="display:none; margin-bottom:.5rem">
+            <div class="form-inline" style="flex-wrap:wrap; gap:.5rem; align-items:center; margin-bottom:.4rem">
+              <select id="pair_dependent" style="min-width:8rem"><option value="">-- ผู้ต้องการ --</option></select>
+              <span style="color:var(--text-muted); font-size:.85rem">ต้องอยู่กับ</span>
+            </div>
+            <div id="pair_providers_list" style="display:flex; flex-wrap:wrap; gap:.4rem; align-items:center; margin-bottom:.4rem">
+              <!-- dynamic provider rows injected by JS -->
+            </div>
+            <button type="button" id="add_provider_row" class="btn-secondary" style="font-size:.8rem; padding:.2rem .6rem">+ เพิ่มตัวเลือก (หรือ)</button>
+          </div>
+          <!-- Shift filter (shared) -->
+          <div class="pair-shifts-wrap" style="display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin-bottom:.5rem">
             <label class="pair-shift-toggle" style="display:inline-flex; align-items:center; gap:.35rem; cursor:pointer; white-space:nowrap">
               <input type="checkbox" id="pair_shift_filter_on" />
               <span>เฉพาะกะ</span>

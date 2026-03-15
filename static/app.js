@@ -3835,6 +3835,10 @@ function getPairSelectedShifts() {
   return Array.from(cbs).map((el) => el.value).filter(Boolean);
 }
 
+function _pairShiftKey(shiftNames) {
+  return JSON.stringify((shiftNames || []).slice().sort());
+}
+
 async function refreshPairs() {
   try {
     const r = await fetch(API + "/staff-pairs");
@@ -3842,35 +3846,69 @@ async function refreshPairs() {
     pairRulesCache = Array.isArray(pairs) ? pairs : [];
     const ul = document.getElementById("pair_list");
     if (!ul) return;
-    ul.innerHTML = (pairs || []).map((p) => {
-      let typeLabel, cls, arrow;
-      if (p.pair_type === "together") { typeLabel = "อยู่ด้วยกัน"; cls = "pair-together"; arrow = "↔"; }
-      else if (p.pair_type === "depends_on") { typeLabel = "ต้องอยู่กับ"; cls = "pair-depends"; arrow = "→"; }
-      else { typeLabel = "ห้ามอยู่ด้วยกัน"; cls = "pair-apart"; arrow = "↔"; }
+
+    // Group depends_on rules by (name_2, shift_key) so OR providers show as one line
+    const depGroups = new Map(); // key -> { name_2, shift_names, ids: [], providers: [] }
+    const otherPairs = [];
+    for (const p of (pairs || [])) {
+      if (p.pair_type === "depends_on") {
+        const key = p.name_2 + "\0" + _pairShiftKey(p.shift_names);
+        if (!depGroups.has(key)) depGroups.set(key, { name_2: p.name_2, shift_names: p.shift_names || [], ids: [], providers: [] });
+        const g = depGroups.get(key);
+        g.ids.push(p.id);
+        g.providers.push(p.name_1);
+      } else {
+        otherPairs.push(p);
+      }
+    }
+
+    const items = [];
+    // depends_on groups
+    for (const g of depGroups.values()) {
+      const shiftNote = g.shift_names.length > 0
+        ? ` <span class="text-muted" style="font-size:.82rem">(เฉพาะ ${g.shift_names.map((s) => escapeHtml(s)).join(", ")})</span>`
+        : "";
+      const providerHtml = g.providers.map((n) => `<strong>${escapeHtml(n)}</strong>`).join(" <span style='color:var(--accent-2);font-weight:700'> หรือ </span> ");
+      const label = `${escapeHtml(g.name_2)} → ต้องอยู่กับ ${providerHtml}${shiftNote}`;
+      items.push(`<li class="skill-list-item"><span class="pair-depends">${label}</span> <button type="button" class="small btn-delete-pair-group" data-ids="${escapeHtml(JSON.stringify(g.ids))}">ลบ</button></li>`);
+    }
+    // other pairs
+    for (const p of otherPairs) {
+      let cls, arrow;
+      if (p.pair_type === "together") { cls = "pair-together"; arrow = "↔"; }
+      else { cls = "pair-apart"; arrow = "↔"; }
       const shiftNote = (p.shift_names || []).length > 0
         ? ` <span class="text-muted" style="font-size:.82rem">(เฉพาะ ${(p.shift_names || []).map((s) => escapeHtml(s)).join(", ")})</span>`
         : "";
-      const label = p.pair_type === "depends_on"
-        ? `${escapeHtml(p.name_2)} ${arrow} ต้องอยู่กับ ${escapeHtml(p.name_1)}`
-        : `${escapeHtml(p.name_1)} ${arrow} ${escapeHtml(p.name_2)} (${typeLabel})`;
-      return `<li class="skill-list-item"><span class="${cls}">${label}${shiftNote}</span> <button type="button" class="small btn-delete-pair" data-id="${p.id}">ลบ</button></li>`;
-    }).join("");
+      const label = `${escapeHtml(p.name_1)} ${arrow} ${escapeHtml(p.name_2)} (${p.pair_type === "together" ? "อยู่ด้วยกัน" : "ห้ามอยู่ด้วยกัน"})`;
+      items.push(`<li class="skill-list-item"><span class="${cls}">${label}${shiftNote}</span> <button type="button" class="small btn-delete-pair" data-id="${p.id}">ลบ</button></li>`);
+    }
+    ul.innerHTML = items.join("");
+
     ul.querySelectorAll(".btn-delete-pair").forEach((btn) => {
       btn.addEventListener("click", async () => {
         await fetch(API + "/staff-pairs/" + btn.dataset.id, { method: "DELETE" });
         await refreshPairs();
       });
     });
+    ul.querySelectorAll(".btn-delete-pair-group").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const ids = JSON.parse(btn.dataset.ids);
+        await Promise.all(ids.map((id) => fetch(API + "/staff-pairs/" + id, { method: "DELETE" })));
+        await refreshPairs();
+      });
+    });
   } catch {}
   try {
     const staff = await loadStaff();
+    const opts = '<option value="">-- เลือก --</option>' + (staff || []).map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
     const sel1 = document.getElementById("pair_staff_1");
     const sel2 = document.getElementById("pair_staff_2");
-    if (sel1 && sel2) {
-      const opts = '<option value="">-- เลือก --</option>' + (staff || []).map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
-      sel1.innerHTML = opts;
-      sel2.innerHTML = opts;
-    }
+    const selDep = document.getElementById("pair_dependent");
+    if (sel1) sel1.innerHTML = opts;
+    if (sel2) sel2.innerHTML = opts;
+    if (selDep) selDep.innerHTML = opts.replace("-- เลือก --", "-- ผู้ต้องการ --");
+    _rebuildProviderSelects(staff || []);
   } catch {}
   refreshPairShiftsSelect();
   const filterOn = document.getElementById("pair_shift_filter_on");
@@ -3882,30 +3920,116 @@ async function refreshPairs() {
   }
 }
 
+let _staffOptsCache = [];
+function _buildProviderSelect(staff) {
+  return '<option value="">-- เลือก --</option>' + (staff || []).map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
+}
+function _rebuildProviderSelects(staff) {
+  _staffOptsCache = staff;
+  document.querySelectorAll(".pair-provider-select").forEach((sel) => {
+    const val = sel.value;
+    sel.innerHTML = _buildProviderSelect(staff);
+    sel.value = val;
+  });
+}
+function _addProviderRow(staff) {
+  const list = document.getElementById("pair_providers_list");
+  if (!list) return;
+  const wrap = document.createElement("span");
+  wrap.style.cssText = "display:inline-flex;align-items:center;gap:.25rem";
+  const sel = document.createElement("select");
+  sel.className = "pair-provider-select";
+  sel.style.minWidth = "8rem";
+  sel.innerHTML = _buildProviderSelect(staff || _staffOptsCache);
+  const del = document.createElement("button");
+  del.type = "button";
+  del.textContent = "✕";
+  del.style.cssText = "font-size:.75rem;padding:.1rem .35rem;line-height:1;";
+  del.className = "btn-secondary";
+  del.addEventListener("click", () => {
+    if (list.querySelectorAll(".pair-provider-select").length > 1) wrap.remove();
+  });
+  wrap.appendChild(sel);
+  wrap.appendChild(del);
+  list.appendChild(wrap);
+}
+
+// pair_type toggle
+(function() {
+  const ptSel = document.getElementById("pair_type");
+  const modeNormal = document.getElementById("pair_mode_normal");
+  const modeDepends = document.getElementById("pair_mode_depends");
+  function updateMode() {
+    const isDep = ptSel && ptSel.value === "depends_on";
+    if (modeNormal) modeNormal.style.display = isDep ? "none" : "";
+    if (modeDepends) modeDepends.style.display = isDep ? "" : "none";
+  }
+  if (ptSel) {
+    ptSel.addEventListener("change", updateMode);
+    updateMode();
+  }
+  const addProvBtn = document.getElementById("add_provider_row");
+  if (addProvBtn) addProvBtn.addEventListener("click", () => _addProviderRow());
+  // init one provider row
+  const list = document.getElementById("pair_providers_list");
+  if (list && list.children.length === 0) _addProviderRow([]);
+})();
+
 document.getElementById("add_pair").addEventListener("click", async () => {
-  const s1 = document.getElementById("pair_staff_1").value;
-  const s2 = document.getElementById("pair_staff_2").value;
   const pt = document.getElementById("pair_type").value;
   const shiftNames = getPairSelectedShifts();
-  if (!s1 || !s2) { alert("เลือกบุคลากรทั้ง 2 คน"); return; }
-  if (s1 === s2) { alert("ต้องเลือกคนละคน"); return; }
-  try {
-    const body = { staff_id_1: parseInt(s1, 10), staff_id_2: parseInt(s2, 10), pair_type: pt };
-    if (shiftNames.length > 0) body.shift_names = shiftNames;
-    const r = await fetch(API + "/staff-pairs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!r.ok) {
-      const d = await r.json().catch(() => ({}));
-      alert(formatApiError(d) || "เพิ่มไม่สำเร็จ");
+
+  if (pt === "depends_on") {
+    const depId = document.getElementById("pair_dependent").value;
+    if (!depId) { alert("เลือกผู้ต้องการก่อน"); return; }
+    const provSelects = document.querySelectorAll(".pair-provider-select");
+    const providerIds = Array.from(provSelects).map((s) => s.value).filter(Boolean);
+    if (providerIds.length === 0) { alert("เลือกอย่างน้อย 1 คนที่ต้องอยู่ด้วย"); return; }
+    const dupProv = providerIds.find((id) => id === depId);
+    if (dupProv) { alert("ผู้ต้องการและผู้อยู่ด้วยต้องเป็นคนละคน"); return; }
+    try {
+      for (const provId of providerIds) {
+        const body = { staff_id_1: parseInt(provId, 10), staff_id_2: parseInt(depId, 10), pair_type: "depends_on" };
+        if (shiftNames.length > 0) body.shift_names = shiftNames;
+        const r = await fetch(API + "/staff-pairs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          alert(formatApiError(d) || "เพิ่มไม่สำเร็จ");
+          return;
+        }
+      }
+    } catch (e) {
+      alert("เกิดข้อผิดพลาด: " + e.message);
       return;
     }
-    await refreshPairs();
-  } catch (e) {
-    alert("เกิดข้อผิดพลาด: " + e.message);
+  } else {
+    const s1 = document.getElementById("pair_staff_1").value;
+    const s2 = document.getElementById("pair_staff_2").value;
+    if (!s1 || !s2) { alert("เลือกบุคลากรทั้ง 2 คน"); return; }
+    if (s1 === s2) { alert("ต้องเลือกคนละคน"); return; }
+    try {
+      const body = { staff_id_1: parseInt(s1, 10), staff_id_2: parseInt(s2, 10), pair_type: pt };
+      if (shiftNames.length > 0) body.shift_names = shiftNames;
+      const r = await fetch(API + "/staff-pairs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        alert(formatApiError(d) || "เพิ่มไม่สำเร็จ");
+        return;
+      }
+    } catch (e) {
+      alert("เกิดข้อผิดพลาด: " + e.message);
+      return;
+    }
   }
+  await refreshPairs();
 });
 
 let _workspaceName = "";
