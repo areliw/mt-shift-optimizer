@@ -1240,10 +1240,12 @@ def api_export_schedule_xlsx(run_id: int | None = None):
 
     ws.row_dimensions[2].height = 22
     ws.row_dimensions[3].height = 20
-    ws.column_dimensions["A"].width = 16
-    ws.column_dimensions["B"].width = 5
+    ws.column_dimensions["A"].width = 6  # day number only
+    ws.column_dimensions["B"].width = 5  # day name
+    # Position headers set initial widths — will be auto-fitted after data
     for ci in range(len(col_keys)):
-        ws.column_dimensions[get_column_letter(ci + 3)].width = 14
+        _, pos, _ = col_keys[ci]
+        ws.column_dimensions[get_column_letter(ci + 3)].width = max(8, len(pos) * 1.3 + 2)
 
     ws.freeze_panes = "A4"
 
@@ -1299,6 +1301,21 @@ def api_export_schedule_xlsx(run_id: int | None = None):
                     c.fill = fill(SHIFT_BG[shift_color_idx[sn]])
 
         ws.row_dimensions[row_num].height = 16
+
+    # Auto-fit column widths based on actual content
+    col_widths: dict = {}
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value is None:
+                continue
+            # Thai chars are wider (~1.8x), estimate display width
+            txt = str(cell.value)
+            w = sum(1.8 if ord(c) > 127 else 1.0 for c in txt) + 2
+            col_letter = get_column_letter(cell.column)
+            if w > col_widths.get(col_letter, 0):
+                col_widths[col_letter] = w
+    for col_letter, w in col_widths.items():
+        ws.column_dimensions[col_letter].width = min(max(w, 6), 30)
 
     # ═══════════════════════════════════════
     # Sheet 2 — สรุปเวรต่อคน
@@ -1362,6 +1379,20 @@ def api_export_schedule_xlsx(run_id: int | None = None):
         c.alignment = CTR
         c.border = BDR
         c.fill = fill("E2E8F0")
+
+    # Auto-fit sheet 2 columns
+    col_widths2: dict = {}
+    for row in ws2.iter_rows():
+        for cell in row:
+            if cell.value is None:
+                continue
+            txt = str(cell.value)
+            w = sum(1.8 if ord(c) > 127 else 1.0 for c in txt) + 2
+            col_letter = get_column_letter(cell.column)
+            if w > col_widths2.get(col_letter, 0):
+                col_widths2[col_letter] = w
+    for col_letter, w in col_widths2.items():
+        ws2.column_dimensions[col_letter].width = min(max(w, 6), 30)
 
     buf = io.BytesIO()
     wb.save(buf)
