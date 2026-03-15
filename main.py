@@ -79,7 +79,7 @@ from database import (
     increment_schedule_run_count,
     get_schedule_run_count,
 )
-from scheduler import generate_schedule, diagnose_infeasible, DUMMY_WORKER
+from scheduler import generate_schedule, diagnose_infeasible, check_shift_limits_config, DUMMY_WORKER
 from ortools.sat.python import cp_model
 from datetime import datetime, timedelta
 
@@ -863,6 +863,12 @@ def api_run_schedule(
     else:
         result["has_dummy"] = False
         result["dummy_count"] = 0
+
+    # ตรวจ shift_limits config warnings (เสมอ — ไม่ขึ้นกับ dummy)
+    sl_warnings = check_shift_limits_config(mt_list, shift_list)
+    if sl_warnings:
+        logger.warning("shift_limits config issues: %s", sl_warnings)
+        result["shift_limits_warnings"] = sl_warnings
 
     # นับคนที่ถูกจัดมากกว่า 1 เวร/วัน
     from collections import Counter

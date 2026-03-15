@@ -370,9 +370,16 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
                     smax = 0
                 if smin is None and smax is None:
                     continue
-                slots = slots_by_shift.get(str(shift_name), [])
+                _sn_exact = str(shift_name).strip()
+                slots = slots_by_shift.get(_sn_exact, [])
                 if not slots:
-                    reasons.append(f"'{mt['name']}' ตั้งเงื่อนไขกะ '{shift_name}' แต่ไม่พบกะนี้ในระบบ")
+                    # normalized fallback
+                    _sn_low = _sn_exact.lower()
+                    _matched = next((k for k in slots_by_shift if k.strip().lower() == _sn_low), None)
+                    if _matched:
+                        slots = slots_by_shift[_matched]
+                    else:
+                        reasons.append(f"'{mt['name']}' ตั้งเงื่อนไขกะ '{shift_name}' แต่ไม่พบกะนี้ในระบบ — ตรวจสอบชื่อกะให้ตรง")
                     continue
                 max_possible = sum(
                     1
@@ -470,6 +477,27 @@ def diagnose_infeasible(mt_list, shift_list, num_days, start_date_str=None):
     if len(reasons) == 1 and reasons[0].startswith("--- สรุป"):
         reasons.insert(0, "ไม่พบปัญหาชัดเจน — ลองลด min เวรของคนที่ตึงที่สุด 2-3 คน ให้ตารางออกก่อน แล้วค่อยปรับจูน")
     return reasons
+
+
+def check_shift_limits_config(mt_list, shift_list):
+    """ตรวจหา shift_limits keys ที่ไม่ตรงกับกะจริง — คืน list of warning strings"""
+    actual_names = {s["name"] for s in shift_list}
+    actual_lower = {s["name"].strip().lower(): s["name"] for s in shift_list}
+    warnings = []
+    for mt in mt_list:
+        sl = mt.get("shift_limits") or {}
+        if not isinstance(sl, dict):
+            continue
+        for key in sl:
+            k = str(key).strip()
+            if k in actual_names:
+                continue
+            matched = actual_lower.get(k.lower())
+            if matched:
+                warnings.append(f"⚠️ '{mt['name']}' shift_limits ใช้ชื่อ '{key}' — ตรงกับ '{matched}' (ต่างกันแค่ตัวพิมพ์/ช่องว่าง ระบบแก้ไขให้อัตโนมัติแล้ว)")
+            else:
+                warnings.append(f"❌ '{mt['name']}' shift_limits ใช้ชื่อ '{key}' — ไม่พบกะนี้ในระบบ กรุณาแก้ชื่อให้ตรง")
+    return warnings
 
 
 class _ProgressCallback(cp_model.CpSolverSolutionCallback):
@@ -759,9 +787,17 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
 
         # min/max ต่อกะรายคน — min = hard, max = hard
         shift_limits = mt.get("shift_limits") or {}
+        # build normalized name map: lower().strip() -> actual shift name
+        _sn_norm = {s["name"].strip().lower(): s["name"] for s in shift_list}
         if isinstance(shift_limits, dict):
             for shift_name, lim in shift_limits.items():
                 if not isinstance(lim, dict):
+                    continue
+                # resolve shift name (exact first, then normalized fallback)
+                _sn_key = str(shift_name).strip()
+                _sn_actual = _sn_key if _sn_key in {s["name"] for s in shift_list} else _sn_norm.get(_sn_key.lower())
+                if not _sn_actual:
+                    logger.warning("shift_limits: '%s' ของ '%s' ไม่ตรงกับกะใด — ข้าม", shift_name, mt["name"])
                     continue
                 try:
                     smin = int(lim.get("min")) if lim.get("min") is not None and str(lim.get("min")) != "" else None
@@ -775,7 +811,7 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
                     assign[(mt["name"], day, shift["name"], pos_name, slot_i)]
                     for day in range(num_days)
                     for shift, pos, pos_name, slot_i in expanded
-                    if shift["name"] == str(shift_name)
+                    if shift["name"] == _sn_actual
                 ]
                 if not shift_terms:
                     continue

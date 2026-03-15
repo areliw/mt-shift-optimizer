@@ -3243,15 +3243,24 @@ document.getElementById("run_schedule").addEventListener("click", async () => {
     if (btn) { btn.disabled = false; btn.classList.remove("is-loading"); if (btnText) btnText.textContent = defaultText; }
     try {
       const data = JSON.parse(e.data);
+      const slWarnings = data.shift_limits_warnings || [];
       if (data.has_dummy && data.dummy_count > 0) {
         const hints = (data.infeasibility_hints || []).map((h) => "<li>" + escapeHtml(h) + "</li>").join("");
+        const slWarnHtml = slWarnings.map((w) => "<li>" + escapeHtml(w) + "</li>").join("");
         msg.innerHTML = `<strong>⚠ สร้างตารางได้บางส่วน — ว่าง ${data.dummy_count} ช่อง</strong> (คนไม่พอหรือมีข้อจำกัด)<br>` +
           (hints ? `<ul class="reasons-list">${hints}</ul>` : "") +
+          (slWarnHtml ? `<ul class="reasons-list">${slWarnHtml}</ul>` : "") +
           `<br>ไปที่หน้า "ตารางล่าสุด" แล้วคลิก <strong>ว่าง</strong> เพื่อมอบหมายเอง`;
         msg.className = "message warning";
       } else {
-        msg.textContent = "สร้างตารางเรียบร้อย (Run #" + data.run_id + ")";
-        msg.className = "message success";
+        if (slWarnings.length > 0) {
+          const slWarnHtml = slWarnings.map((w) => "<li>" + escapeHtml(w) + "</li>").join("");
+          msg.innerHTML = `สร้างตารางเรียบร้อย (Run #${data.run_id})<br><strong>⚠ ตรวจพบปัญหา shift_limits:</strong><ul class="reasons-list">${slWarnHtml}</ul>`;
+          msg.className = "message warning";
+        } else {
+          msg.textContent = "สร้างตารางเรียบร้อย (Run #" + data.run_id + ")";
+          msg.className = "message success";
+        }
       }
       // เคลียร์ข้อความ multi-shift เก่าก่อน
       document.querySelectorAll(".multi-shift-msg").forEach(el => el.remove());
