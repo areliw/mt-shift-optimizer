@@ -4,7 +4,7 @@
   --surface:      #ffffff;
   --surface-2:    #f8fafc;
   --border:       #e2e8f0;
-  --border-light: #f1f5f9;
+  --border-light: #dde3ec;
   --text:         #0f172a;
   --text-2:       #334155;
   --muted:        #64748b;
@@ -393,7 +393,7 @@ body.app-layout {
 
 /* ===== Form sections (fieldset grouping) ===== */
 .form-section {
-  border: 1px solid var(--border-light);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: .875rem 1rem 1rem;
   margin: 0 0 .875rem;
@@ -606,7 +606,7 @@ textarea:focus {
   display: inline-flex;
   align-items: center;
   gap: .3rem;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: .88rem;
   font-weight: 500;
 }
@@ -620,7 +620,7 @@ textarea:focus {
 .form-group label {
   font-size: .88rem;
   font-weight: 500;
-  color: var(--muted);
+  color: var(--text-2);
 }
 
 .form-group input,
@@ -2626,3 +2626,131 @@ li .name { flex: 1; }
 .legend-swatch.lh { background: #c62828; }
 .legend-swatch.lw { background: var(--surface-2); border: 1.5px solid var(--border); }
 .legend-swatch.lwe { background: var(--surface-2); border: 1.5px solid var(--accent); }
+
+/* ===== Staff quick-add form ===== */
+.staff-quickadd {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+.staff-qa-row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  min-width: 0;
+}
+.staff-name-input { flex: 2 1 10rem; min-width: 0; }
+.staff-title-select { flex: 1 1 8rem; min-width: 0; }
+.staff-qa-label {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-2);
+  white-space: nowrap;
+  min-width: 3.8rem;
+}
+.staff-pill-scroll {
+  flex: 1;
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: .35rem;
+  scrollbar-width: none;
+  padding: 1px 0;
+  min-width: 0;
+}
+.staff-pill-scroll::-webkit-scrollbar { display: none; }
+.btn-add-staff { white-space: nowrap; flex-shrink: 0; }
+
+/* ===== Catalog grid (skills page) ===== */
+.catalog-card { padding: 0 !important; overflow: hidden; }
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+@media (max-width: 700px) {
+  .catalog-grid { grid-template-columns: 1fr; }
+}
+.catalog-section {
+  padding: 1.25rem 1.25rem 1.5rem;
+  border-right: 1px solid var(--border-light);
+}
+.catalog-section:last-child { border-right: none; }
+@media (max-width: 700px) {
+  .catalog-section { border-right: none; border-bottom: 1px solid var(--border-light); }
+  .catalog-section:last-child { border-bottom: none; }
+}
+.catalog-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .75rem;
+  padding-bottom: .5rem;
+  border-bottom: 2px solid var(--border);
+}
+.catalog-section-title {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.catalog-add-row {
+  display: flex;
+  gap: .4rem;
+  align-items: center;
+  margin-bottom: .75rem;
+  flex-wrap: wrap;
+}
+.catalog-add-row input { flex: 1; min-width: 0; }
+.catalog-sep { color: var(--muted); font-size: .9rem; flex-shrink: 0; }
+.btn-add-inline {
+  padding: .35rem .7rem !important;
+  min-height: 0 !important;
+  font-size: .85rem;
+  flex-shrink: 0;
+}
+.title-type-select { font-size: .8rem; padding: .3rem .5rem; min-height: 0; }
+.catalog-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+}
+.catalog-list-item {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .25rem .6rem .25rem .75rem;
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  font-size: .82rem;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.catalog-item-name { flex: 1; }
+.catalog-item-badge {
+  font-size: .7rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--border-light);
+  border-radius: 999px;
+  padding: .1rem .4rem;
+}
+.catalog-item-del {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: var(--muted);
+  padding: 0 .15rem !important;
+  min-height: 0 !important;
+  font-size: .9rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color .12s;
+}
+.catalog-item-del:hover { color: var(--danger) !important; background: none !important; }
