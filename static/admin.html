@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MT Shift — Admin Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #f0f4f8; color: #1a202c; min-height: 100vh; }
+  header { background: #1e40af; color: white; padding: 1.25rem 2rem; display: flex; align-items: center; gap: 1rem; }
+  header h1 { font-size: 1.3rem; font-weight: 700; }
+  header span { opacity: 0.7; font-size: 0.85rem; }
+  .container { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem; }
+
+  /* KPI cards */
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+  .kpi { background: white; border-radius: 12px; padding: 1.25rem 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  .kpi .label { font-size: 0.78rem; color: #64748b; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .4rem; }
+  .kpi .value { font-size: 2rem; font-weight: 800; color: #1e40af; line-height: 1; }
+  .kpi .sub { font-size: 0.78rem; color: #94a3b8; margin-top: .3rem; }
+  .kpi.green .value { color: #16a34a; }
+  .kpi.orange .value { color: #d97706; }
+  .kpi.purple .value { color: #7c3aed; }
+
+  /* Table */
+  .card { background: white; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); overflow: hidden; }
+  .card-header { padding: 1rem 1.5rem; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; }
+  .card-header h2 { font-size: 1rem; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+  thead th { background: #f8fafc; padding: .75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: .05em; color: #64748b; font-weight: 600; }
+  tbody tr { border-top: 1px solid #f1f5f9; transition: background .15s; }
+  tbody tr:hover { background: #f8fafc; }
+  td { padding: .75rem 1rem; vertical-align: middle; }
+  .badge { display: inline-block; padding: .2rem .6rem; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+  .badge.active { background: #dcfce7; color: #16a34a; }
+  .badge.recent { background: #dbeafe; color: #1d4ed8; }
+  .badge.stale { background: #fef9c3; color: #a16207; }
+  .badge.dead { background: #f1f5f9; color: #94a3b8; }
+  .mono { font-family: monospace; font-size: .8rem; color: #64748b; }
+  .num { font-weight: 600; color: #1e40af; }
+
+  /* auth */
+  #auth-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #f0f4f8; }
+  .auth-box { background: white; border-radius: 16px; padding: 2.5rem 2rem; width: 340px; box-shadow: 0 4px 24px rgba(0,0,0,.12); }
+  .auth-box h2 { font-size: 1.2rem; font-weight: 700; margin-bottom: 1.5rem; color: #1e40af; }
+  .auth-box input { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: .65rem .9rem; font-size: .9rem; margin-bottom: 1rem; }
+  .auth-box button { width: 100%; background: #1e40af; color: white; border: none; border-radius: 8px; padding: .75rem; font-size: .95rem; font-weight: 600; cursor: pointer; }
+  .auth-box button:hover { background: #1d3a9e; }
+  .auth-error { color: #dc2626; font-size: .82rem; margin-top: .5rem; }
+
+  #main-screen { display: none; }
+  .refresh-btn { background: #e2e8f0; border: none; padding: .4rem .9rem; border-radius: 8px; cursor: pointer; font-size: .82rem; font-weight: 600; color: #374151; }
+  .refresh-btn:hover { background: #cbd5e1; }
+  .loading { text-align: center; padding: 3rem; color: #94a3b8; }
+</style>
+</head>
+<body>
+
+<div id="auth-screen">
+  <div class="auth-box">
+    <h2>MT Shift Admin</h2>
+    <input type="password" id="api-key-input" placeholder="API Key" />
+    <button onclick="login()">เข้าสู่ระบบ</button>
+    <div class="auth-error" id="auth-error"></div>
+  </div>
+</div>
+
+<div id="main-screen">
+  <header>
+    <h1>MT Shift — Admin Dashboard</h1>
+    <span id="updated-at"></span>
+  </header>
+  <div class="container">
+    <div class="kpi-grid" id="kpi-grid">
+      <div class="loading">กำลังโหลด...</div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <h2>Workspace ทั้งหมด</h2>
+        <button class="refresh-btn" onclick="loadStats()">รีเฟรช</button>
+      </div>
+      <div id="table-wrap"><div class="loading">กำลังโหลด...</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let _apiKey = "";
+
+function login() {
+  const key = document.getElementById("api-key-input").value.trim();
+  if (!key) return;
+  _apiKey = key;
+  document.getElementById("auth-screen").style.display = "none";
+  document.getElementById("main-screen").style.display = "block";
+  loadStats();
+}
+
+document.getElementById("api-key-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") login();
+});
+
+async function loadStats() {
+  try {
+    const r = await fetch("/api/admin/stats", {
+      headers: { "X-API-Key": _apiKey }
+    });
+    if (r.status === 401 || r.status === 403) {
+      document.getElementById("main-screen").style.display = "none";
+      document.getElementById("auth-screen").style.display = "flex";
+      document.getElementById("auth-error").textContent = "API Key ไม่ถูกต้อง";
+      return;
+    }
+    const d = await r.json();
+    renderKPI(d);
+    renderTable(d.workspaces || []);
+    document.getElementById("updated-at").textContent = "อัพเดท " + new Date().toLocaleTimeString("th-TH");
+  } catch (e) {
+    document.getElementById("table-wrap").innerHTML = `<div class="loading">โหลดไม่สำเร็จ: ${e.message}</div>`;
+  }
+}
+
+function renderKPI(d) {
+  const grid = document.getElementById("kpi-grid");
+  const items = [
+    { label: "Workspaces ทั้งหมด", value: d.total_workspaces, sub: "แผนกที่สร้าง", cls: "" },
+    { label: "Active 30 วัน", value: d.active_30d, sub: `7 วัน: ${d.active_7d} แผนก`, cls: "green" },
+    { label: "ตารางที่สร้างแล้ว", value: d.total_schedules_run, sub: "ครั้ง", cls: "purple" },
+    { label: "บุคลากรทั้งหมด", value: d.total_staff_managed, sub: "คน (active)", cls: "orange" },
+    { label: "Manual Edits", value: d.total_manual_edits, sub: "slot ที่แก้มือ", cls: "" },
+    { label: "เวลาที่ประหยัดได้", value: `~${d.estimated_hours_saved}`, sub: "ชั่วโมง (ประมาณ)", cls: "green" },
+  ];
+  grid.innerHTML = items.map(i => `
+    <div class="kpi ${i.cls}">
+      <div class="label">${i.label}</div>
+      <div class="value">${i.value}</div>
+      <div class="sub">${i.sub}</div>
+    </div>
+  `).join("");
+}
+
+function activityBadge(last_accessed) {
+  if (!last_accessed) return '<span class="badge dead">ไม่เคยใช้</span>';
+  const days = Math.floor((Date.now() - new Date(last_accessed + "Z").getTime()) / 86400000);
+  if (days <= 7) return `<span class="badge active">Active (${days}วัน)</span>`;
+  if (days <= 30) return `<span class="badge recent">${days} วันที่แล้ว</span>`;
+  if (days <= 90) return `<span class="badge stale">${days} วันที่แล้ว</span>`;
+  return `<span class="badge dead">${days} วันที่แล้ว</span>`;
+}
+
+function renderTable(ws) {
+  if (!ws.length) {
+    document.getElementById("table-wrap").innerHTML = '<div class="loading">ไม่มีข้อมูล</div>';
+    return;
+  }
+  // sort by last_accessed desc
+  ws.sort((a, b) => {
+    if (!a.last_accessed && !b.last_accessed) return 0;
+    if (!a.last_accessed) return 1;
+    if (!b.last_accessed) return -1;
+    return new Date(b.last_accessed) - new Date(a.last_accessed);
+  });
+  document.getElementById("table-wrap").innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Workspace</th>
+          <th>สร้างเมื่อ</th>
+          <th>ใช้ล่าสุด</th>
+          <th>Status</th>
+          <th>บุคลากร</th>
+          <th>ตาราง</th>
+          <th>Manual Edits</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${ws.map(w => `
+          <tr>
+            <td>
+              <a href="/w/${w.id}/" target="_blank" style="color:#1e40af;font-weight:600;text-decoration:none">${esc(w.name || "(ไม่มีชื่อ)")}</a><br>
+              <span class="mono">${w.id}</span>
+            </td>
+            <td style="color:#64748b;font-size:.8rem">${fmt(w.created_at)}</td>
+            <td style="color:#64748b;font-size:.8rem">${w.last_accessed ? fmt(w.last_accessed) : "—"}</td>
+            <td>${activityBadge(w.last_accessed)}</td>
+            <td class="num">${w.staff_count}</td>
+            <td class="num">${w.schedules_run}</td>
+            <td class="num">${w.manual_edits}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function fmt(dt) {
+  if (!dt) return "—";
+  try { return new Date(dt + (dt.includes("T") ? "" : "T00:00:00Z")).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }); }
+  catch { return dt; }
+}
+function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+</script>
+</body>
+</html>

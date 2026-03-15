@@ -74,14 +74,9 @@ def init_master_db():
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL DEFAULT '',
             access_token TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            last_accessed TEXT
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
     """)
-    # migration: เพิ่ม last_accessed ถ้ายังไม่มี
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(workspace)").fetchall()]
-    if "last_accessed" not in cols:
-        conn.execute("ALTER TABLE workspace ADD COLUMN last_accessed TEXT")
     conn.commit()
     # Migrate: เพิ่มคอลัมน์ access_token ให้ตารางเก่า
     try:
@@ -191,17 +186,8 @@ def verify_workspace_token(wid: str, token: str) -> bool:
     stored = row[0] or ""
     # workspace มี token ว่าง (ข้อมูลเก่าก่อน migrate) → อนุญาตเข้าได้เสมอ
     if not stored:
-        ok = True
-    else:
-        ok = secrets.compare_digest(stored, token)
-    if ok:
-        conn2 = _get_master_connection()
-        conn2.execute(
-            "UPDATE workspace SET last_accessed = datetime('now') WHERE id = ?", (wid,)
-        )
-        conn2.commit()
-        conn2.close()
-    return ok
+        return True
+    return secrets.compare_digest(stored, token)
 
 
 def get_workspace(wid: str):
@@ -230,10 +216,84 @@ def list_workspaces(include_tokens: bool = False):
         conn.close()
         return [{"id": r[0], "name": r[1], "created_at": r[2], "token": r[3]} for r in rows]
     rows = conn.execute(
-        "SELECT id, name, created_at, last_accessed FROM workspace ORDER BY created_at DESC"
+        "SELECT id, name, created_at FROM workspace ORDER BY created_at DESC"
     ).fetchall()
     conn.close()
-    return [{"id": r[0], "name": r[1], "created_at": r[2], "last_accessed": r[3]} for r in rows]
+    return [{"id": r[0], "name": r[1], "created_at": r[2]} for r in rows]
+
+
+def get_admin_stats() -> dict:
+    """รวม aggregate stats จาก master DB + scan workspace DBs ทั้งหมด"""
+    from datetime import datetime, timezone
+    conn = _get_master_connection()
+    workspaces = conn.execute(
+        "SELECT id, name, created_at, last_accessed FROM workspace"
+    ).fetchall()
+    conn.close()
+
+    total_workspaces = len(workspaces)
+    now = datetime.now(timezone.utc)
+    active_7d = 0
+    active_30d = 0
+    total_schedules = 0
+    total_staff = 0
+    total_manual_edits = 0
+    ws_details = []
+
+    for wid, name, created_at, last_accessed in workspaces:
+        if last_accessed:
+            try:
+                la = datetime.fromisoformat(last_accessed.replace("Z", "+00:00"))
+                if la.tzinfo is None:
+                    la = la.replace(tzinfo=timezone.utc)
+                delta = (now - la).days
+                if delta <= 7:
+                    active_7d += 1
+                if delta <= 30:
+                    active_30d += 1
+            except Exception:
+                pass
+
+        ws_path = WORKSPACES_DIR / f"{wid}.db"
+        schedules = staff = manual_edits = 0
+        if ws_path.exists():
+            try:
+                wconn = sqlite3.connect(str(ws_path))
+                schedules = wconn.execute("SELECT COUNT(*) FROM schedule_run").fetchone()[0]
+                staff = wconn.execute("SELECT COUNT(*) FROM mt WHERE active=1").fetchone()[0]
+                try:
+                    manual_edits = wconn.execute(
+                        "SELECT COUNT(*) FROM schedule_slot WHERE is_manual_override=1"
+                    ).fetchone()[0]
+                except Exception:
+                    pass
+                wconn.close()
+            except Exception:
+                pass
+
+        total_schedules += schedules
+        total_staff += staff
+        total_manual_edits += manual_edits
+        ws_details.append({
+            "id": wid,
+            "name": name,
+            "created_at": created_at,
+            "last_accessed": last_accessed,
+            "schedules_run": schedules,
+            "staff_count": staff,
+            "manual_edits": manual_edits,
+        })
+
+    return {
+        "total_workspaces": total_workspaces,
+        "active_7d": active_7d,
+        "active_30d": active_30d,
+        "total_schedules_run": total_schedules,
+        "total_staff_managed": total_staff,
+        "total_manual_edits": total_manual_edits,
+        "estimated_hours_saved": total_schedules * 2,
+        "workspaces": ws_details,
+    }
 
 
 def delete_workspace(wid: str) -> bool:

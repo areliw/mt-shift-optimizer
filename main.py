@@ -30,6 +30,7 @@ from database import (
     create_workspace,
     delete_workspace,
     get_workspace,
+    get_admin_stats,
     list_workspaces,
     set_workspace_context,
     verify_workspace_token,
@@ -1581,6 +1582,11 @@ def api_create_workspace(body: WorkspaceCreate = Body(WorkspaceCreate())):
     return {"id": wid, "token": token, "url": f"/w/{wid}/"}
 
 
+@app.get("/api/admin/stats", dependencies=[Depends(verify_api_key)])
+def api_admin_stats():
+    return get_admin_stats()
+
+
 @app.get("/api/workspaces", dependencies=[Depends(verify_api_key)])
 def api_list_workspaces():
     # dev mode (no API_KEY) → ส่ง token กลับมาด้วยเพื่อให้ browser sync
@@ -1609,6 +1615,11 @@ def api_delete_workspace(workspace_id: str):
 def api_get_schedule_run_count():
     """คืนจำนวนครั้งที่กดสร้างตารางเวรรวมทั้งหมด (ทุก workspace)"""
     return {"total": get_schedule_run_count()}
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page():
+    return FileResponse(STATIC_DIR / "admin.html")
 
 
 # --- Landing page ---
