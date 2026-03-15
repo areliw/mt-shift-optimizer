@@ -3527,6 +3527,12 @@ document.getElementById("print_schedule").addEventListener("click", () => {
     ["data-run","data-day","data-shift","data-pos","data-slot","data-name"].forEach(a => el.removeAttribute(a));
     el.style.cursor = "default";
   });
+  // Show only day number in first column (e.g. "1 ม.ค. 2568" → "1")
+  clone.querySelectorAll("tbody tr td:first-child").forEach(td => {
+    const txt = td.textContent.trim();
+    const num = txt.match(/^(\d+)/);
+    if (num) td.textContent = num[1];
+  });
 
   const thShifts = clone.querySelectorAll("th.th-shift");
 
@@ -3563,7 +3569,9 @@ table.schedule thead th { font-weight: 700; }
 table.schedule td:first-child { background: #f8fafc !important; font-weight: 600; white-space: nowrap; width: 52px; min-width: 52px; }
 .td-has-dummy { background: #fee2e2 !important; color: #b91c1c !important; font-weight: 700; }
 .td-inactive { background: #f8fafc !important; color: #94a3b8 !important; }
-tr.tr-holiday td:first-child { background: #fef08a !important; font-weight: 700; }
+tr.tr-holiday td { background: #fef08a !important; }
+tr.tr-holiday .td-has-dummy { background: #fee2e2 !important; }
+tr.tr-holiday td:first-child { font-weight: 700; }
 
 /* ── Legend ── */
 .legend { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
