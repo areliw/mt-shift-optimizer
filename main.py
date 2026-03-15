@@ -1116,6 +1116,7 @@ def api_export_schedule_xlsx(run_id: int | None = None):
 
     # Build ordered columns
     seen_cols: dict = {}
+    shift_order: list = []  # preserve original shift order
     for s in slots:
         pos = s.get(pos_key) or s.get("room") or ""
         si = s.get("slot_index", 0)
@@ -1125,7 +1126,10 @@ def api_export_schedule_xlsx(run_id: int | None = None):
             if si > 0:
                 label += f" ({si+1})"
             seen_cols[key] = label
-    col_keys = list(seen_cols.keys())
+        if s["shift_name"] not in shift_order:
+            shift_order.append(s["shift_name"])
+    # Sort col_keys so all positions of the same shift are consecutive
+    col_keys = sorted(seen_cols.keys(), key=lambda k: (shift_order.index(k[0]), k[1], k[2]))
     col_headers = [seen_cols[k] for k in col_keys]
 
     # Map shift name → color index
