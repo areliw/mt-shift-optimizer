@@ -3494,16 +3494,16 @@ document.getElementById("import_json_file").addEventListener("change", async (e)
 });
 
 // --- Print Schedule A4 ---
-// Shift color palette (bg, header bg, header text)
+// Shift color palette — cool tones, varied lightness for B&W distinction
 const SHIFT_COLORS = [
-  { bg: "#dbeafe", hbg: "#1d4ed8", htxt: "#ffffff" }, // blue
-  { bg: "#dcfce7", hbg: "#15803d", htxt: "#ffffff" }, // green
-  { bg: "#fef9c3", hbg: "#a16207", htxt: "#ffffff" }, // yellow
-  { bg: "#fce7f3", hbg: "#9d174d", htxt: "#ffffff" }, // pink
-  { bg: "#f3e8ff", hbg: "#6b21a8", htxt: "#ffffff" }, // purple
-  { bg: "#ffedd5", hbg: "#c2410c", htxt: "#ffffff" }, // orange
-  { bg: "#cffafe", hbg: "#0e7490", htxt: "#ffffff" }, // cyan
-  { bg: "#e0e7ff", hbg: "#3730a3", htxt: "#ffffff" }, // indigo
+  { bg: "#dbeafe" }, // blue-100     gray ~89%
+  { bg: "#99f6e4" }, // teal-200     gray ~88%
+  { bg: "#c7d2fe" }, // indigo-200   gray ~84%
+  { bg: "#bae6fd" }, // sky-200      gray ~87%
+  { bg: "#ddd6fe" }, // violet-200   gray ~86%
+  { bg: "#a5f3fc" }, // cyan-200     gray ~90%
+  { bg: "#bbf7d0" }, // emerald-200  gray ~88%
+  { bg: "#e0e7ff" }, // indigo-100   gray ~89%
 ];
 
 document.getElementById("print_schedule").addEventListener("click", () => {
