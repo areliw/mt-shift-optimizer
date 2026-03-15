@@ -397,9 +397,10 @@ function _renderWsList(el, items, limit) {
   }
   if (items.length > limit) {
     const more = document.createElement('button');
-    more.className = 'btn-outline';
-    more.style.cssText = 'width:100%;margin-top:.5rem;font-size:.85rem';
-    more.textContent = 'แสดงเพิ่มเติม (' + (items.length - limit) + ' รายการ)';
+    more.style.cssText = 'width:100%;margin-top:.75rem;padding:.6rem 1rem;background:none;border:1.5px dashed #cbd5e1;border-radius:10px;color:#64748b;font-size:.82rem;font-weight:600;cursor:pointer;letter-spacing:.03em;transition:all .15s';
+    more.textContent = '▾  แสดงเพิ่มเติม ' + (items.length - limit) + ' รายการ';
+    more.onmouseenter = () => { more.style.borderColor = '#94a3b8'; more.style.color = '#334155'; more.style.background = '#f8fafc'; };
+    more.onmouseleave = () => { more.style.borderColor = '#cbd5e1'; more.style.color = '#64748b'; more.style.background = 'none'; };
     more.onclick = () => _renderWsList(el, items, limit + _WS_PAGE);
     el.appendChild(more);
   }
