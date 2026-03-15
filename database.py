@@ -2262,6 +2262,8 @@ def _validate_depends_on_for_shift(conn, run_id, day, shift_name, overrides=None
         WHERE sp.pair_type = 'depends_on'
         """
     ).fetchall()
+    # OR-grouped: dependent ต้องการ ANY หนึ่งใน providers (เหมือน solver logic)
+    dep_groups: dict = {}  # dependent_name -> [provider_name, ...]
     for provider_name, dependent_name, shift_names_raw in pair_rows:
         try:
             shift_names = json.loads(shift_names_raw) if shift_names_raw else []
@@ -2272,8 +2274,13 @@ def _validate_depends_on_for_shift(conn, run_id, day, shift_name, overrides=None
         shift_names = [str(s).strip() for s in shift_names if str(s).strip()]
         if shift_names and shift_name not in shift_names:
             continue
-        if dependent_name in assigned_set and provider_name not in assigned_set:
-            raise ValueError(f"'{dependent_name}' ต้องอยู่กะเดียวกันกับ '{provider_name}' ({shift_name})")
+        dep_groups.setdefault(dependent_name, []).append(provider_name)
+    for dependent_name, providers in dep_groups.items():
+        if dependent_name not in assigned_set:
+            continue
+        if not any(p in assigned_set for p in providers):
+            provider_list = " หรือ ".join(providers)
+            raise ValueError(f"'{dependent_name}' ต้องอยู่กะเดียวกันกับ '{provider_list}' ({shift_name})")
 
 
 def _validate_manual_assignment(conn, run_id, day, shift_name, position, slot_index, staff_name, exclude_slot=None, override_slots=None):

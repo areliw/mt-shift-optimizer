@@ -1848,25 +1848,30 @@ async function handleDummyClick(span, staffList, runId, busyByDay, dayShiftStaff
     return lvl >= minSkillLevel;
   };
 
-  const busy = busyByDay && busyByDay[day] ? busyByDay[day] : new Set();
+  // busySameShift = มีเวรในกะนี้แล้ว (hard block), busyOtherShift = มีเวรกะอื่น (warn เท่านั้น)
+  const sameShiftKey = `${day}-${shiftName}`;
+  const sameShiftStaff = (dayShiftStaffMap && dayShiftStaffMap[sameShiftKey]) ? dayShiftStaffMap[sameShiftKey] : new Set();
+  const allDayStaff = (busyByDay && busyByDay[day]) ? busyByDay[day] : new Set();
   // แยกคนเลือกได้ vs เลือกไม่ได้ → เลือกได้อยู่ข้างบน
   const eligible = [];
   const ineligible = [];
   staffList.forEach((mt) => {
-    const isBusy = busy.has(mt.name);
+    const isBusySameShift = sameShiftStaff.has(mt.name);
+    const isBusyOtherShift = !isBusySameShift && allDayStaff.has(mt.name);
     const hasSkill = canWorkPosition(mt);
     const isOff = _isStaffOffOnDay(mt, day, startDate);
     const hasTimeWindow = _canWorkPositionTimeWindow(mt, positionTimeWindowName);
     const pairCheck = _checkDependsOnPairForCandidate(mt.name, day, shiftName, dayShiftStaffMap, null);
     let label = mt.name;
     const reasons = [];
-    if (isBusy) reasons.push("มีเวรแล้ว");
+    if (isBusySameShift) reasons.push("มีเวรกะนี้แล้ว");
+    else if (isBusyOtherShift) reasons.push("มีเวรกะอื่นวันนี้");
     if (!hasSkill && requiredSkill) reasons.push("ไม่มีทักษะ");
     if (isOff) reasons.push("off");
     if (!hasTimeWindow && positionTimeWindowName) reasons.push("ไม่อยู่ช่วงเวลา");
     if (!pairCheck.ok) reasons.push(pairCheck.reason);
     if (reasons.length) label += " (" + reasons.join(", ") + ")";
-    const disabled = isBusy || (!hasSkill && requiredSkill) || isOff || !hasTimeWindow || !pairCheck.ok;
+    const disabled = isBusySameShift || (!hasSkill && requiredSkill) || isOff || !hasTimeWindow || !pairCheck.ok;
     (disabled ? ineligible : eligible).push({ mt, label, disabled });
   });
   eligible.forEach(({ mt, label }) => {
@@ -1999,28 +2004,33 @@ function _openNameDropdown(span, staffList, runId, busyByDay, dayShiftStaffMap, 
     return lvl >= minSkillLevel;
   };
 
-  const busy = new Set(busyByDay && busyByDay[day] ? [...busyByDay[day]] : []);
-  busy.delete(currentName);
+  const sameShiftKey2 = `${day}-${shiftName}`;
+  const sameShiftStaff2 = (dayShiftStaffMap && dayShiftStaffMap[sameShiftKey2]) ? new Set([...dayShiftStaffMap[sameShiftKey2]]) : new Set();
+  const allDayStaff2 = (busyByDay && busyByDay[day]) ? new Set([...busyByDay[day]]) : new Set();
+  sameShiftStaff2.delete(currentName);
+  allDayStaff2.delete(currentName);
 
   // แยกคนเลือกได้ vs เลือกไม่ได้ → เลือกได้อยู่ข้างบน
   const eligible = [];
   const ineligible = [];
   staffList.forEach((mt) => {
-    const isBusy = busy.has(mt.name);
+    const isBusySameShift = mt.name !== currentName && sameShiftStaff2.has(mt.name);
+    const isBusyOtherShift = !isBusySameShift && mt.name !== currentName && allDayStaff2.has(mt.name);
     const hasSkill = canWorkPosition(mt);
     const isOff = _isStaffOffOnDay(mt, day, startDate);
     const hasTimeWindow = _canWorkPositionTimeWindow(mt, positionTimeWindowName);
     const pairCheck = _checkDependsOnPairForCandidate(mt.name, day, shiftName, dayShiftStaffMap, currentName);
     let label = mt.name;
     const reasons = [];
-    if (isBusy && mt.name !== currentName) reasons.push("มีเวรแล้ว");
+    if (isBusySameShift) reasons.push("มีเวรกะนี้แล้ว");
+    else if (isBusyOtherShift) reasons.push("มีเวรกะอื่นวันนี้");
     if (!hasSkill && requiredSkill) reasons.push("ไม่มีทักษะ");
     if (isOff) reasons.push("off");
     if (!hasTimeWindow && positionTimeWindowName) reasons.push("ไม่อยู่ช่วงเวลา");
     if (!pairCheck.ok && mt.name !== currentName) reasons.push(pairCheck.reason);
     if (reasons.length) label += " (" + reasons.join(", ") + ")";
     const isCurrent = mt.name === currentName;
-    const disabled = !isCurrent && (isBusy || (!hasSkill && requiredSkill) || isOff || !hasTimeWindow || !pairCheck.ok);
+    const disabled = !isCurrent && (isBusySameShift || (!hasSkill && requiredSkill) || isOff || !hasTimeWindow || !pairCheck.ok);
     (disabled ? ineligible : eligible).push({ mt, label, disabled, isCurrent });
   });
   eligible.forEach(({ mt, label, isCurrent }) => {
