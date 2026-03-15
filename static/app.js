@@ -3835,6 +3835,126 @@ function getPairSelectedShifts() {
   return Array.from(cbs).map((el) => el.value).filter(Boolean);
 }
 
+// ===== PAIR RULES DIAGNOSTICS =====
+async function diagnosePairRules() {
+  const pairs = pairRulesCache || [];
+  const issues = []; // { level: 'error'|'warn', msg }
+
+  // Load shift names for unknown-shift check
+  let shiftNames = [];
+  try {
+    const sv = await loadShifts();
+    shiftNames = (sv || []).map((s) => s.name);
+  } catch {}
+  const shiftSet = new Set(shiftNames);
+
+  // Build lookup structures
+  // apartSet: Set of "A|B" (canonical: sorted) for apart pairs
+  const apartSet = new Set();
+  // togetherSet: Set of "A|B"
+  const togetherSet = new Set();
+  // depGroups: Map of "dep\0shiftKey" -> [provider, ...]
+  const depGroupsMap = new Map();
+
+  for (const p of pairs) {
+    const a = p.name_1, b = p.name_2;
+    if (!a || !b) continue;
+    const canonical = [a, b].sort().join("|");
+    if (p.pair_type === "apart") apartSet.add(canonical);
+    else if (p.pair_type === "together") togetherSet.add(canonical);
+    else if (p.pair_type === "depends_on") {
+      const key = b + "\0" + _pairShiftKey(p.shift_names);
+      if (!depGroupsMap.has(key)) depGroupsMap.set(key, { dep: b, shift_names: p.shift_names || [], providers: [] });
+      depGroupsMap.get(key).providers.push(a);
+    }
+    // Unknown shift check
+    if ((p.shift_names || []).length > 0 && shiftSet.size > 0) {
+      for (const sn of p.shift_names) {
+        if (sn && !shiftSet.has(sn)) {
+          issues.push({ level: "error", msg: `Rule "${a} ↔ ${b}": ชื่อกะ "${sn}" ไม่มีในระบบ (ตรวจสะกด)` });
+        }
+      }
+    }
+  }
+
+  // 1. Together + Apart conflict
+  for (const key of togetherSet) {
+    if (apartSet.has(key)) {
+      const [x, y] = key.split("|");
+      issues.push({ level: "error", msg: `"${x}" กับ "${y}" มีทั้ง "อยู่ด้วยกัน" และ "ห้ามอยู่ด้วยกัน" — ขัดแย้งกัน` });
+    }
+  }
+
+  // 2. depends_on + apart conflict (provider ที่ต้องอยู่ด้วย แต่มี apart กัน)
+  for (const { dep, shift_names, providers } of depGroupsMap.values()) {
+    const shiftLabel = shift_names.length ? ` [${shift_names.join(", ")}]` : " [ทุกกะ]";
+    for (const prov of providers) {
+      const canonical = [dep, prov].sort().join("|");
+      if (apartSet.has(canonical)) {
+        issues.push({ level: "error", msg: `"${dep}" ต้องอยู่กับ "${prov}"${shiftLabel} แต่มี rule "ห้ามอยู่ด้วยกัน" ระหว่างกัน — เป็นไปไม่ได้` });
+      }
+    }
+  }
+
+  // 3. Impossible group — ALL providers are apart from dependent
+  for (const { dep, shift_names, providers } of depGroupsMap.values()) {
+    const shiftLabel = shift_names.length ? ` [${shift_names.join(", ")}]` : " [ทุกกะ]";
+    if (providers.length > 0) {
+      const allApart = providers.every((prov) => apartSet.has([dep, prov].sort().join("|")));
+      if (allApart) {
+        issues.push({ level: "error", msg: `"${dep}"${shiftLabel}: ทุก provider (${providers.join(", ")}) ต่างมี rule "ห้ามอยู่ด้วยกัน" กับ "${dep}" — ไม่มีทางสำเร็จ` });
+      }
+    }
+  }
+
+  // 4. Circular depends_on (A ต้องอยู่กับ B และ B ต้องอยู่กับ A ใน shift filter เดียวกัน)
+  for (const [, g] of depGroupsMap) {
+    const { dep, shift_names, providers } = g;
+    const sf = _pairShiftKey(shift_names);
+    for (const prov of providers) {
+      // Check if prov has a depends_on group that includes dep, same shift filter
+      const reverseKey = prov + "\0" + sf;
+      const reverseGroup = depGroupsMap.get(reverseKey);
+      if (reverseGroup && reverseGroup.providers.includes(dep)) {
+        // Only report once (canonical order)
+        if (dep < prov) {
+          const shiftLabel = shift_names.length ? ` [${shift_names.join(", ")}]` : " [ทุกกะ]";
+          issues.push({ level: "warn", msg: `Circular: "${dep}" ต้องอยู่กับ "${prov}" และ "${prov}" ต้องอยู่กับ "${dep}"${shiftLabel} — ทั้งคู่ต้องลงเวรพร้อมกันตลอด` });
+        }
+      }
+    }
+  }
+
+  // 5. depends_on where provider doesn't exist as staff (cross-check with pairRulesCache names)
+  // (Already caught by form, but in case of import)
+  const allStaffNames = new Set();
+  try {
+    const sv = await loadStaff();
+    (sv || []).forEach((s) => allStaffNames.add(s.name));
+  } catch {}
+  if (allStaffNames.size > 0) {
+    for (const p of pairs) {
+      if (!allStaffNames.has(p.name_1)) issues.push({ level: "warn", msg: `Rule อ้างถึง "${p.name_1}" แต่ไม่พบในรายชื่อบุคลากร` });
+      if (!allStaffNames.has(p.name_2)) issues.push({ level: "warn", msg: `Rule อ้างถึง "${p.name_2}" แต่ไม่พบในรายชื่อบุคลากร` });
+    }
+  }
+
+  // Render
+  const out = document.getElementById("pair_diag_result");
+  if (!out) return;
+  out.style.display = "";
+  if (issues.length === 0) {
+    out.innerHTML = `<div class="message success" style="margin:0">✓ ไม่พบปัญหาใน rules จับคู่บุคลากร</div>`;
+    return;
+  }
+  const rows = issues.map((i) => {
+    const icon = i.level === "error" ? "❌" : "⚠️";
+    const cls = i.level === "error" ? "color:#c0392b" : "color:#b7790a";
+    return `<li style="${cls}; margin-bottom:.3rem">${icon} ${escapeHtml(i.msg)}</li>`;
+  }).join("");
+  out.innerHTML = `<div class="message warning" style="margin:0; padding:.6rem .8rem"><strong>พบ ${issues.length} ปัญหา:</strong><ul class="reasons-list" style="margin:.4rem 0 0 0">${rows}</ul></div>`;
+}
+
 function _pairShiftKey(shiftNames) {
   return JSON.stringify((shiftNames || []).slice().sort());
 }
@@ -3974,6 +4094,16 @@ function _addProviderRow(staff) {
   const list = document.getElementById("pair_providers_list");
   if (list && list.children.length === 0) _addProviderRow([]);
 })();
+
+document.getElementById("btn_diag_pairs").addEventListener("click", async () => {
+  const btn = document.getElementById("btn_diag_pairs");
+  btn.disabled = true;
+  btn.textContent = "กำลังตรวจ…";
+  try { await diagnosePairRules(); } finally {
+    btn.disabled = false;
+    btn.textContent = "🔍 ตรวจสอบ rules";
+  }
+});
 
 document.getElementById("add_pair").addEventListener("click", async () => {
   const pt = document.getElementById("pair_type").value;
