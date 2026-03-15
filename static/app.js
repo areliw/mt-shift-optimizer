@@ -1911,9 +1911,9 @@ async function handleDummyClick(span, staffList, runId, busyByDay, dayShiftStaff
     if (!hasSkill && requiredSkill) reasons.push("ไม่มีทักษะ");
     if (isOff) reasons.push("off");
     if (!hasTimeWindow && positionTimeWindowName) reasons.push("ไม่อยู่ช่วงเวลา");
-    if (!pairCheck.ok) reasons.push(pairCheck.reason);
+    if (!pairCheck.ok) reasons.push("⚠ " + pairCheck.reason);
     if (reasons.length) label += " (" + reasons.join(", ") + ")";
-    const disabled = isBusySameShift || (!hasSkill && requiredSkill) || isOff || !hasTimeWindow || !pairCheck.ok;
+    const disabled = isBusySameShift || (!hasSkill && requiredSkill) || isOff || !hasTimeWindow;
     (disabled ? ineligible : eligible).push({ mt, label, disabled });
   });
   eligible.forEach(({ mt, label }) => {
@@ -2057,10 +2057,10 @@ function _openNameDropdown(span, staffList, runId, busyByDay, dayShiftStaffMap, 
     if (!hasSkill && requiredSkill) reasons.push("ไม่มีทักษะ");
     if (isOff) reasons.push("off");
     if (!hasTimeWindow && positionTimeWindowName) reasons.push("ไม่อยู่ช่วงเวลา");
-    if (!pairCheck.ok && mt.name !== currentName) reasons.push(pairCheck.reason);
+    if (!pairCheck.ok && mt.name !== currentName) reasons.push("⚠ " + pairCheck.reason);
     if (reasons.length) label += " (" + reasons.join(", ") + ")";
     const isCurrent = mt.name === currentName;
-    const disabled = !isCurrent && (isBusySameShift || (!hasSkill && requiredSkill) || isOff || !hasTimeWindow || !pairCheck.ok);
+    const disabled = !isCurrent && (isBusySameShift || (!hasSkill && requiredSkill) || isOff || !hasTimeWindow);
     (disabled ? ineligible : eligible).push({ mt, label, disabled, isCurrent });
   });
   eligible.forEach(({ mt, label, isCurrent }) => {
