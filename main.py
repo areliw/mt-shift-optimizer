@@ -994,36 +994,84 @@ def api_export_schedule_csv(run_id: int | None = None):
         data = get_latest_schedule()
     if data is None:
         raise HTTPException(status_code=404, detail="No schedule to export.")
-    buf = io.StringIO()
-    w = csv.writer(buf)
+
+    slots = data.get("slots", [])
     start_date = data.get("start_date")
-    pos_key = "position" if data["slots"] and "position" in data["slots"][0] else "room"
-    has_tw = data["slots"] and data["slots"][0].get("time_window")
-    header = ["date", "day", "shift", "position", "staff_name"] if not has_tw else ["date", "day", "shift", "position", "time_window", "staff_name"]
+    pos_key = "position" if slots and "position" in slots[0] else "room"
+
+    # Build ordered shift/position/slot columns from slots
+    seen_cols: dict = {}  # (shift_name, pos, slot_index) -> col_header
+    for s in slots:
+        pos = s.get(pos_key) or s.get("room") or ""
+        si = s.get("slot_index", 0)
+        key = (s["shift_name"], pos, si)
+        if key not in seen_cols:
+            label = f"{s['shift_name']} / {pos}" if pos else s["shift_name"]
+            if si > 0:
+                label += f" ({si + 1})"
+            seen_cols[key] = label
+
+    col_keys = list(seen_cols.keys())
+    col_headers = [seen_cols[k] for k in col_keys]
+
+    # Index slots by (day, shift, pos, slot_index)
+    slot_map: dict = {}
+    for s in slots:
+        pos = s.get(pos_key) or s.get("room") or ""
+        si = s.get("slot_index", 0)
+        slot_map[(s["day"], s["shift_name"], pos, si)] = s
+
+    num_days = data.get("num_days") or (max(s["day"] for s in slots) + 1 if slots else 0)
+
+    # Resolve base date
+    base = None
     if start_date:
-        w.writerow(header)
         try:
             base = datetime.strptime(start_date, "%Y-%m-%d").date()
-            for s in data["slots"]:
-                d = base + timedelta(days=s["day"])
-                row = [d.isoformat(), s["day"] + 1, s["shift_name"], s.get(pos_key, s.get("room", "")), s["staff_name"]]
-                if has_tw:
-                    row.insert(4, s.get("time_window", ""))
-                w.writerow(row)
         except ValueError:
-            w.writerow([h for h in header if h != "date"])
-            for s in data["slots"]:
-                row = [s["day"] + 1, s["shift_name"], s.get(pos_key, s.get("room", "")), s["staff_name"]]
-                if has_tw:
-                    row.insert(3, s.get("time_window", ""))
-                w.writerow(row)
-    else:
-        w.writerow([h for h in header if h != "date"])
-        for s in data["slots"]:
-            row = [s["day"] + 1, s["shift_name"], s.get(pos_key, s.get("room", "")), s["staff_name"]]
-            if has_tw:
-                row.insert(3, s.get("time_window", ""))
-            w.writerow(row)
+            pass
+
+    THAI_MONTHS_SHORT = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+                         "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
+    DAY_TH = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"]
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+
+    # Header row
+    w.writerow(["วันที่", "วัน"] + col_headers)
+
+    for day in range(num_days):
+        if base:
+            dt = base + timedelta(days=day)
+            date_label = f"{dt.day} {THAI_MONTHS_SHORT[dt.month - 1]} {dt.year + 543}"
+            day_label = DAY_TH[dt.weekday()]
+        else:
+            date_label = str(day + 1)
+            day_label = ""
+
+        row = [date_label, day_label]
+        for (sn, pos, si) in col_keys:
+            s = slot_map.get((day, sn, pos, si))
+            if s is None:
+                row.append("—")  # shift inactive this day
+            elif s.get("is_dummy"):
+                row.append("ว่าง")
+            else:
+                row.append(s.get("staff_name", ""))
+        w.writerow(row)
+
+    # Blank separator + summary section
+    w.writerow([])
+    w.writerow(["สรุปเวรต่อคน"])
+    w.writerow(["ชื่อ", "จำนวนเวร"])
+    count_by_staff: dict = {}
+    for s in slots:
+        if not s.get("is_dummy"):
+            count_by_staff[s["staff_name"]] = count_by_staff.get(s["staff_name"], 0) + 1
+    for name, cnt in sorted(count_by_staff.items(), key=lambda x: -x[1]):
+        w.writerow([name, cnt])
+
     content = buf.getvalue().encode("utf-8-sig")
     return Response(
         content=content,
