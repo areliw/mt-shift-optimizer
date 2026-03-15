@@ -1481,6 +1481,7 @@ function renderSchedule(data, staffList) {
   const meta = document.getElementById("schedule_meta");
   const wrap = document.getElementById("schedule_table_wrap");
   const exportLink = document.getElementById("export_csv");
+  const exportXlsx = document.getElementById("export_xlsx");
   const printBtn = document.getElementById("print_schedule");
   // Clear dummy warning banner ถ้ามี
   const oldWarn = document.getElementById("dummy_warn_banner");
@@ -1490,6 +1491,7 @@ function renderSchedule(data, staffList) {
     meta.textContent = "ยังไม่มีตาราง — กด \"สร้างตารางเวร\" เพื่อสร้าง";
     wrap.innerHTML = "";
     exportLink.style.display = "none";
+    if (exportXlsx) exportXlsx.style.display = "none";
     if (printBtn) printBtn.style.display = "none";
     return;
   }
@@ -1505,6 +1507,10 @@ function renderSchedule(data, staffList) {
   meta.textContent = `Run #${runId} — สร้างเมื่อ ${data.created_at} (${displayDays} วัน)${dateRange ? " · " + dateRange : ""}${metaSuffix}`;
   exportLink.href = API + "/schedule/export/csv?run_id=" + runId;
   exportLink.style.display = "inline";
+  if (exportXlsx) {
+    exportXlsx.href = API + "/schedule/export/xlsx?run_id=" + runId;
+    exportXlsx.style.display = "inline";
+  }
   if (printBtn) printBtn.style.display = "inline";
 
   // Banner แจ้งเตือนถ้ามี dummy slots

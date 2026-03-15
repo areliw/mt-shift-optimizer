@@ -1080,6 +1080,260 @@ def api_export_schedule_csv(run_id: int | None = None):
     )
 
 
+@ws_router.get("/api/schedule/export/xlsx")
+def api_export_schedule_xlsx(run_id: int | None = None):
+    from datetime import datetime, timedelta
+    from openpyxl import Workbook
+    from openpyxl.styles import (PatternFill, Font, Alignment, Border, Side,
+                                  GradientFill)
+    from openpyxl.utils import get_column_letter
+
+    if run_id is not None:
+        data = get_schedule(run_id)
+    else:
+        data = get_latest_schedule()
+    if data is None:
+        raise HTTPException(status_code=404, detail="No schedule to export.")
+
+    slots = data.get("slots", [])
+    start_date = data.get("start_date")
+    pos_key = "position" if slots and "position" in slots[0] else "room"
+
+    THAI_MONTHS_SHORT = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.",
+                         "ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."]
+    DAY_TH = ["จ","อ","พ","พฤ","ศ","ส","อา"]
+    WEEKEND = {5, 6}  # Saturday, Sunday
+
+    # Shift color palette (cool tones, matches print)
+    SHIFT_BG = ["EFF6FF","F0FDFA","EEF2FF","F0F9FF","FAF5FF","ECFEFF","F0FDF4","F5F3FF"]
+
+    base = None
+    if start_date:
+        try:
+            base = datetime.strptime(start_date, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
+    # Build ordered columns
+    seen_cols: dict = {}
+    for s in slots:
+        pos = s.get(pos_key) or s.get("room") or ""
+        si = s.get("slot_index", 0)
+        key = (s["shift_name"], pos, si)
+        if key not in seen_cols:
+            label = f"{s['shift_name']} / {pos}" if pos else s["shift_name"]
+            if si > 0:
+                label += f" ({si+1})"
+            seen_cols[key] = label
+    col_keys = list(seen_cols.keys())
+    col_headers = [seen_cols[k] for k in col_keys]
+
+    # Map shift name → color index
+    shift_color_idx: dict = {}
+    ci = 0
+    for (sn, _, __) in col_keys:
+        if sn not in shift_color_idx:
+            shift_color_idx[sn] = ci % len(SHIFT_BG)
+            ci += 1
+
+    slot_map: dict = {}
+    for s in slots:
+        pos = s.get(pos_key) or s.get("room") or ""
+        si = s.get("slot_index", 0)
+        slot_map[(s["day"], s["shift_name"], pos, si)] = s
+
+    num_days = data.get("num_days") or (max(s["day"] for s in slots) + 1 if slots else 0)
+
+    # --- Helpers ---
+    def thin_border():
+        t = Side(style="thin", color="CBD5E1")
+        return Border(left=t, right=t, top=t, bottom=t)
+
+    def fill(hex_color):
+        return PatternFill("solid", fgColor=hex_color)
+
+    wb = Workbook()
+
+    # ═══════════════════════════════════════
+    # Sheet 1 — ตารางเวร
+    # ═══════════════════════════════════════
+    ws = wb.active
+    ws.title = "ตารางเวร"
+
+    # Title row
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=2 + len(col_keys))
+    title_cell = ws.cell(1, 1)
+    date_range = ""
+    if base and num_days:
+        end_dt = base + timedelta(days=num_days - 1)
+        date_range = (f"{base.day} {THAI_MONTHS_SHORT[base.month-1]} {base.year+543}"
+                      f" – {end_dt.day} {THAI_MONTHS_SHORT[end_dt.month-1]} {end_dt.year+543}")
+    title_cell.value = f"ตารางเวร{' · ' + date_range if date_range else ''}"
+    title_cell.font = Font(name="Cordia New", bold=True, size=14, color="1D4ED8")
+    title_cell.alignment = Alignment(horizontal="left", vertical="center")
+    title_cell.fill = fill("FFFFFF")
+    ws.row_dimensions[1].height = 22
+
+    # Header row (row 2)
+    HDR_FILL = fill("1E293B")
+    HDR_FONT = Font(name="Cordia New", bold=True, color="F8FAFC", size=11)
+    CTR = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    BDR = thin_border()
+
+    ws.cell(2, 1, "วันที่").font = HDR_FONT
+    ws.cell(2, 1).fill = HDR_FILL
+    ws.cell(2, 1).alignment = CTR
+    ws.cell(2, 1).border = BDR
+    ws.cell(2, 2, "วัน").font = HDR_FONT
+    ws.cell(2, 2).fill = HDR_FILL
+    ws.cell(2, 2).alignment = CTR
+    ws.cell(2, 2).border = BDR
+
+    for ci, (label, key) in enumerate(zip(col_headers, col_keys), start=3):
+        c = ws.cell(2, ci, label)
+        c.font = HDR_FONT
+        c.fill = HDR_FILL
+        c.alignment = CTR
+        c.border = BDR
+
+    ws.row_dimensions[2].height = 30
+    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["B"].width = 5
+    for ci in range(len(col_keys)):
+        ws.column_dimensions[get_column_letter(ci + 3)].width = 14
+
+    ws.freeze_panes = "A3"
+
+    # Data rows
+    for day in range(num_days):
+        row_num = day + 3
+        if base:
+            dt = base + timedelta(days=day)
+            date_label = f"{dt.day} {THAI_MONTHS_SHORT[dt.month-1]} {dt.year+543}"
+            day_label = DAY_TH[dt.weekday()]
+            is_weekend = dt.weekday() in WEEKEND
+        else:
+            date_label = str(day + 1)
+            day_label = ""
+            is_weekend = False
+
+        # Check holiday
+        iso = (base + timedelta(days=day)).isoformat() if base else ""
+        is_holiday = iso in (data.get("holidays") or [])
+        row_base_fill = fill("FEF08A") if is_holiday else (fill("FFF7ED") if is_weekend else None)
+
+        def set_day_cell(col, val, bold=False):
+            c = ws.cell(row_num, col, val)
+            c.font = Font(name="Cordia New", bold=bold, size=10)
+            c.alignment = CTR
+            c.border = BDR
+            if row_base_fill:
+                c.fill = row_base_fill
+            elif day % 2 == 1:
+                c.fill = fill("F8FAFC")
+            return c
+
+        set_day_cell(1, date_label, bold=is_holiday or is_weekend)
+        set_day_cell(2, day_label, bold=True)
+
+        for ci, (sn, pos, si) in enumerate(col_keys, start=3):
+            s = slot_map.get((day, sn, pos, si))
+            c = ws.cell(row_num, ci)
+            c.alignment = CTR
+            c.border = BDR
+            c.font = Font(name="Cordia New", size=10)
+
+            if s is None:
+                c.value = ""
+                c.fill = fill("F8FAFC")
+            elif s.get("is_dummy"):
+                c.value = "ว่าง"
+                c.fill = fill("FEE2E2")
+                c.font = Font(name="Cordia New", size=10, bold=True, color="B91C1C")
+            else:
+                c.value = s.get("staff_name", "")
+                if row_base_fill:
+                    c.fill = row_base_fill
+                elif day % 2 == 1:
+                    c.fill = fill("F8FAFC")
+                else:
+                    c.fill = fill(SHIFT_BG[shift_color_idx[sn]])
+
+        ws.row_dimensions[row_num].height = 16
+
+    # ═══════════════════════════════════════
+    # Sheet 2 — สรุปเวรต่อคน
+    # ═══════════════════════════════════════
+    ws2 = wb.create_sheet("สรุปเวรต่อคน")
+
+    count_by_staff: dict = {}
+    shift_matrix: dict = {}
+    all_shifts = list(dict.fromkeys(s["shift_name"] for s in slots))
+    for s in slots:
+        if not s.get("is_dummy"):
+            nm = s["staff_name"]
+            count_by_staff[nm] = count_by_staff.get(nm, 0) + 1
+            k = (nm, s["shift_name"])
+            shift_matrix[k] = shift_matrix.get(k, 0) + 1
+
+    sorted_staff = sorted(count_by_staff.items(), key=lambda x: -x[1])
+    max_c = sorted_staff[0][1] if sorted_staff else 1
+
+    # Title
+    ws2.merge_cells(start_row=1, start_column=1, end_row=1, end_column=3 + len(all_shifts))
+    t2 = ws2.cell(1, 1, f"สรุปเวรต่อคน{' · ' + date_range if date_range else ''}")
+    t2.font = Font(name="Cordia New", bold=True, size=14, color="1D4ED8")
+    t2.alignment = Alignment(horizontal="left", vertical="center")
+    ws2.row_dimensions[1].height = 22
+
+    # Header
+    for ci, val in enumerate(["#", "ชื่อ", "เวรรวม"] + all_shifts, start=1):
+        c = ws2.cell(2, ci, val)
+        c.font = HDR_FONT
+        c.fill = HDR_FILL
+        c.alignment = CTR
+        c.border = BDR
+    ws2.row_dimensions[2].height = 22
+    ws2.column_dimensions["A"].width = 5
+    ws2.column_dimensions["B"].width = 18
+    ws2.column_dimensions["C"].width = 10
+    for ci in range(len(all_shifts)):
+        ws2.column_dimensions[get_column_letter(ci + 4)].width = 12
+    ws2.freeze_panes = "A3"
+
+    for i, (name, total) in enumerate(sorted_staff, start=1):
+        r = i + 2
+        row_fill = fill("F8FAFC") if i % 2 == 0 else None
+        for ci, val in enumerate([i, name, total] + [shift_matrix.get((name, sn), 0) or "—" for sn in all_shifts], start=1):
+            c = ws2.cell(r, ci, val)
+            c.font = Font(name="Cordia New", size=10, bold=(ci == 2))
+            c.alignment = Alignment(horizontal="center" if ci != 2 else "left", vertical="center")
+            c.border = BDR
+            if row_fill:
+                c.fill = row_fill
+        ws2.row_dimensions[r].height = 16
+
+    # Footer total row
+    fr = len(sorted_staff) + 3
+    for ci, val in enumerate(["", "รวม", sum(count_by_staff.values())] + [
+        sum(shift_matrix.get((n, sn), 0) for n, _ in sorted_staff) for sn in all_shifts
+    ], start=1):
+        c = ws2.cell(fr, ci, val)
+        c.font = Font(name="Cordia New", bold=True, size=10)
+        c.alignment = CTR
+        c.border = BDR
+        c.fill = fill("E2E8F0")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return Response(
+        content=buf.read(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=schedule.xlsx"},
+    )
+
+
 # --- Manual Slot Assignment ---
 @ws_router.patch("/api/schedule/{run_id:int}/slot")
 def api_assign_slot(run_id: int, body: SlotAssign):
