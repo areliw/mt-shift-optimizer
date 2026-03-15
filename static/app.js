@@ -3528,69 +3528,7 @@ document.getElementById("print_schedule").addEventListener("click", () => {
     el.style.cursor = "default";
   });
 
-  // Color-code columns by shift index
-  // th-shift headers define shift groups — find them and map column ranges
   const thShifts = clone.querySelectorAll("th.th-shift");
-  const shiftColorMap = {}; // shiftName -> color
-  thShifts.forEach((th, i) => {
-    const sn = th.textContent.trim();
-    shiftColorMap[sn] = SHIFT_COLORS[i % SHIFT_COLORS.length];
-    const c = SHIFT_COLORS[i % SHIFT_COLORS.length];
-    th.style.background = c.hbg;
-    th.style.color = c.htxt;
-    th.style.fontWeight = "700";
-  });
-  // Color th-pos headers and td cells by matching data-room/data-shift text
-  // Use column index approach: build col→shiftIdx map from th-shift row
-  const headerRows = clone.querySelectorAll("thead tr");
-  let shiftRow = null;
-  headerRows.forEach(r => { if (r.querySelector("th.th-shift")) shiftRow = r; });
-  if (shiftRow) {
-    // Map col index → color
-    const colColors = [];
-    let colIdx = 1; // skip first col (day)
-    shiftRow.querySelectorAll("th.th-shift").forEach((th, i) => {
-      const span = parseInt(th.getAttribute("colspan") || "1");
-      const c = SHIFT_COLORS[i % SHIFT_COLORS.length];
-      for (let k = 0; k < span; k++) colColors[colIdx++] = c;
-    });
-    // Apply to th-pos
-    headerRows.forEach(r => {
-      let ci = 0;
-      r.querySelectorAll("th").forEach(th => {
-        if (th.classList.contains("th-day")) { ci++; return; }
-        const span = parseInt(th.getAttribute("colspan") || "1");
-        const c = colColors[ci];
-        if (c && th.classList.contains("th-pos")) {
-          th.style.background = c.hbg + "22";
-          th.style.color = "#1e293b";
-          th.style.borderTop = "2px solid " + c.hbg;
-        }
-        ci += span;
-      });
-    });
-    // Apply to td cells
-    clone.querySelectorAll("tbody tr").forEach(row => {
-      let ci = 0;
-      row.querySelectorAll("td").forEach(td => {
-        if (ci === 0) { ci++; return; } // day col
-        const c = colColors[ci];
-        if (c && !td.classList.contains("td-has-dummy") && !td.classList.contains("td-inactive")) {
-          td.style.background = c.bg;
-        }
-        ci++;
-      });
-    });
-  }
-
-  // Style holiday rows — override with a distinct color
-  clone.querySelectorAll("tr.tr-holiday").forEach(row => {
-    row.querySelectorAll("td:not(:first-child)").forEach(td => {
-      if (!td.classList.contains("td-has-dummy")) {
-        td.style.background = "#fef08a";
-      }
-    });
-  });
 
   const now = new Date();
   const printedAt = now.toLocaleDateString("th-TH", { year: "numeric", month: "long", day: "numeric" });
@@ -3672,14 +3610,8 @@ table.summary tbody tr:hover td { background: #eff6ff; }
 
   printWin.document.write(clone.outerHTML);
 
-  // Legend
-  const shiftNames = Array.from(thShifts).map(th => th.textContent.trim());
   let legendHtml = '<div class="legend">';
-  shiftNames.forEach((sn, i) => {
-    const c = SHIFT_COLORS[i % SHIFT_COLORS.length];
-    legendHtml += `<div class="legend-item"><div class="legend-dot" style="background:${c.bg};border:1px solid ${c.hbg}"></div>${sn.replace(/&/g,"&amp;").replace(/</g,"&lt;")}</div>`;
-  });
-  legendHtml += '<div class="legend-item"><div class="legend-dot legend-holiday"></div>วันหยุด</div>';
+  legendHtml += '<div class="legend-item"><div class="legend-dot legend-holiday"></div>วันหยุดราชการ</div>';
   legendHtml += '<div class="legend-item"><div class="legend-dot legend-dummy"></div>ช่องว่าง (จัดไม่ได้)</div>';
   legendHtml += '</div>';
   printWin.document.write(legendHtml);
