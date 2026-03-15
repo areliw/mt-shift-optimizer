@@ -1559,24 +1559,19 @@ def api_import(data: dict = Body(...)):
 
 
 # --- Frontend: serve index.html inside workspace ---
-@ws_router.get("/staff", response_class=HTMLResponse)
-def staff_page():
-    staff_html = STATIC_DIR / "staff.html"
-    if staff_html.exists():
-        return FileResponse(staff_html)
-    return HTMLResponse("<h1>Staff</h1><p>Add static/staff.html for the staff detail page.</p>")
+
+# Mount workspace router
+app.include_router(ws_router, prefix="/w/{workspace_id}")
 
 
-@ws_router.get("/", response_class=HTMLResponse)
-def workspace_index():
+# Serve index.html WITHOUT auth — token lives in #hash (client-only), not HTTP headers
+@app.get("/w/{workspace_id}/", response_class=HTMLResponse)
+@app.get("/w/{workspace_id}/staff", response_class=HTMLResponse)
+def workspace_html_pages(workspace_id: str):
     index_html = STATIC_DIR / "index.html"
     if index_html.exists():
         return FileResponse(index_html)
     return HTMLResponse("<h1>MT Shift Optimizer</h1><p>Add static/index.html for the UI.</p>")
-
-
-# Mount workspace router
-app.include_router(ws_router, prefix="/w/{workspace_id}")
 
 
 # ==========================================
