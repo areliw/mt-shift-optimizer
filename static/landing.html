@@ -365,12 +365,20 @@ async function loadWorkspaces() {
   try {
     const r = await fetch('/api/workspaces');
     if (r.status === 401 || r.status === 403) {
-      // API_KEY required — ใช้ token จาก localStorage แทน
+      // API_KEY required — ดึงชื่อแต่ละ workspace จาก /api/workspaces/{id} แทน
       const tokens = _getTokens();
       const el = document.getElementById('wsList');
       const ids = Object.keys(tokens);
       if (!ids.length) { el.innerHTML = '<p class="empty-msg">ยังไม่มี workspace ในเครื่องนี้ — สร้างใหม่ได้เลย</p>'; return; }
-      el.innerHTML = ids.map(id => `<div class="ws-item"><a href="/w/${id}/?t=${tokens[id]}" class="ws-link">${id}</a></div>`).join('');
+      el.innerHTML = '<p class="empty-msg">กำลังโหลด...</p>';
+      const details = await Promise.all(ids.map(async id => {
+        try {
+          const wr = await fetch('/api/workspaces/' + id);
+          if (wr.ok) { const d = await wr.json(); return { id, name: d.name || id, token: tokens[id] }; }
+        } catch {}
+        return { id, name: id, token: tokens[id] };
+      }));
+      el.innerHTML = details.map(w => `<div class="ws-item"><a href="/w/${w.id}/?t=${w.token}" class="ws-link">${w.name || w.id}</a></div>`).join('');
       return;
     }
     if (!r.ok) { document.getElementById('wsList').innerHTML = '<p class="empty-msg">โหลดไม่สำเร็จ (' + r.status + ')</p>'; return; }
