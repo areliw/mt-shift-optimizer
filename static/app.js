@@ -1472,7 +1472,12 @@ function formatApiError(d) {
   return "";
 }
 
+let _lastScheduleData = null;
+let _lastStaffList = [];
+
 function renderSchedule(data, staffList) {
+  _lastScheduleData = data;
+  _lastStaffList = staffList || [];
   const meta = document.getElementById("schedule_meta");
   const wrap = document.getElementById("schedule_table_wrap");
   const exportLink = document.getElementById("export_csv");
@@ -3607,17 +3612,42 @@ tr.tr-holiday td:first-child { font-weight: 700; }
 
 /* ── Summary (page 2) ── */
 .page-break { page-break-before: always; }
-.summary-header { border-bottom: 3px solid #1d4ed8; padding-bottom: 5px; margin-bottom: 8px; }
-.summary-title { font-size: 12pt; font-weight: 700; color: #1d4ed8; }
+.summary-header { border-bottom: 3px solid #1d4ed8; padding-bottom: 5px; margin-bottom: 10px; }
+.summary-title { font-size: 13pt; font-weight: 700; color: #1d4ed8; }
 .summary-sub { font-size: 8.5pt; color: #475569; margin-top: 2px; }
-table.summary { border-collapse: collapse; table-layout: auto; margin: 0 auto; }
-table.summary th, table.summary td {
-  border: 1px solid #cbd5e1; padding: 3px 8px; text-align: center;
-  font-size: 8pt; white-space: nowrap;
+
+/* KPI cards */
+.kpi-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.kpi-card { border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 12px;
+  text-align: center; min-width: 58px; background: #f8fafc; }
+.kpi-card.kpi-warn { border-color: #fca5a5; background: #fff1f2; }
+.kpi-val { font-size: 14pt; font-weight: 700; color: #1e293b; line-height: 1.2; }
+.kpi-label { font-size: 6.5pt; color: #64748b; margin-top: 2px; }
+
+/* Summary table */
+table.summary { border-collapse: collapse; width: 100%; }
+table.summary th {
+  background: #1e293b; color: #f8fafc; font-weight: 700;
+  padding: 4px 8px; font-size: 8pt; white-space: nowrap; text-align: center;
 }
-table.summary thead th { background: #1d4ed8; color: #fff; font-weight: 700; }
-table.summary tbody tr:nth-child(even) td { background: #f8fafc; }
-table.summary tbody tr:hover td { background: #eff6ff; }
+table.summary th.col-name { text-align: left; }
+table.summary td { border-bottom: 1px solid #f1f5f9; padding: 3px 8px; font-size: 8pt; vertical-align: middle; }
+table.summary tr.row-even td { background: #f8fafc; }
+.col-rank { width: 24px; text-align: center; color: #94a3b8; font-size: 7pt; }
+.col-name { text-align: left; font-weight: 600; white-space: nowrap; min-width: 80px; }
+.col-bar { width: 160px; padding: 3px 8px; }
+.col-shift { width: 40px; text-align: center; }
+.col-total { width: 36px; text-align: center; font-weight: 700; color: #1d4ed8; }
+.cell-zero { color: #cbd5e1; }
+.bar-wrap { position: relative; background: #f1f5f9; border-radius: 3px; height: 12px;
+  display: flex; align-items: center; overflow: hidden; }
+.bar-fill { position: absolute; left: 0; top: 0; bottom: 0;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa); border-radius: 3px; }
+.bar-label { position: relative; z-index: 1; font-size: 7pt; font-weight: 700;
+  color: #1e293b; padding-left: 5px; }
+table.summary tfoot td { border-top: 2px solid #1e293b; font-size: 8pt; text-align: center;
+  background: #f8fafc; padding: 3px 8px; }
+.foot-label { text-align: left; font-weight: 600; color: #475569; }
 
 /* ── Footer ── */
 @page { @bottom-right { content: "หน้า " counter(page) "/" counter(pages); font-size: 7pt; } }
@@ -3649,21 +3679,83 @@ table.summary tbody tr:hover td { background: #eff6ff; }
   legendHtml += '</div>';
   printWin.document.write(legendHtml);
 
-  // Summary on page 2
-  const summary = document.getElementById("schedule_summary");
-  if (summary) {
+  // Summary on page 2 — rebuilt from data (not DOM clone)
+  if (_lastScheduleData && _lastScheduleData.slots) {
+    const slots = _lastScheduleData.slots;
+    const realSlots = slots.filter(s => !s.is_dummy);
+    const dummyCount = slots.filter(s => s.is_dummy).length;
+    const countByStaff = {};
+    const shiftSet = new Set();
+    const matrix = {};
+    realSlots.forEach(s => {
+      countByStaff[s.staff_name] = (countByStaff[s.staff_name] || 0) + 1;
+      shiftSet.add(s.shift_name);
+      const k = s.staff_name + "|||" + s.shift_name;
+      matrix[k] = (matrix[k] || 0) + 1;
+    });
+    const sorted = Object.entries(countByStaff).sort((a, b) => b[1] - a[1]);
+    const shiftNames = [...shiftSet];
+    const maxC = sorted.length ? sorted[0][1] : 0;
+    const minC = sorted.length ? sorted[sorted.length - 1][1] : 0;
+    const spread = maxC - minC;
+    const avg = sorted.length ? (realSlots.length / sorted.length).toFixed(1) : 0;
+    const spreadClass = spread <= 1 ? "#16a34a" : spread <= 2 ? "#d97706" : "#dc2626";
+    const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;");
+
     printWin.document.write(`<div class="page-break"></div>
 <div class="summary-header">
-  <div class="summary-title">สรุปเวรต่อคน${wsName ? " — " + wsName.replace(/&/g,"&amp;").replace(/</g,"&lt;") : ""}</div>
-  <div class="summary-sub">${dateRange ? "ประจำเดือน " + dateRange.replace(/&/g,"&amp;").replace(/</g,"&lt;") : ""}</div>
-</div>`);
-    const summaryClone = summary.cloneNode(true);
-    summaryClone.querySelectorAll("table").forEach(t => {
-      t.classList.add("summary");
-      t.style.tableLayout = "auto";
-      t.style.width = "auto";
-    });
-    printWin.document.write(summaryClone.innerHTML);
+  <div class="summary-title">สรุปเวรต่อคน${wsName ? " — " + esc(wsName) : ""}</div>
+  <div class="summary-sub">${dateRange ? "ประจำเดือน " + esc(dateRange) : ""}</div>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi-card"><div class="kpi-val">${sorted.length}</div><div class="kpi-label">บุคลากร</div></div>
+  <div class="kpi-card"><div class="kpi-val">${realSlots.length}</div><div class="kpi-label">เวรทั้งหมด</div></div>
+  <div class="kpi-card"><div class="kpi-val">${avg}</div><div class="kpi-label">เฉลี่ย/คน</div></div>
+  <div class="kpi-card"><div class="kpi-val">${maxC}</div><div class="kpi-label">สูงสุด</div></div>
+  <div class="kpi-card"><div class="kpi-val">${minC}</div><div class="kpi-label">ต่ำสุด</div></div>
+  <div class="kpi-card"><div class="kpi-val" style="color:${spreadClass}">${spread}</div><div class="kpi-label">ความต่าง</div></div>
+  ${dummyCount > 0 ? `<div class="kpi-card kpi-warn"><div class="kpi-val">${dummyCount}</div><div class="kpi-label">ช่องว่าง</div></div>` : ""}
+</div>
+
+<table class="summary">
+<thead>
+  <tr>
+    <th class="col-rank">#</th>
+    <th class="col-name">ชื่อ</th>
+    <th class="col-bar">จำนวนเวร</th>
+    ${shiftNames.map(sn => `<th class="col-shift">${esc(sn)}</th>`).join("")}
+    <th class="col-total">รวม</th>
+  </tr>
+</thead>
+<tbody>
+${sorted.map(([name, total], i) => {
+  const pct = maxC > 0 ? Math.round((total / maxC) * 100) : 0;
+  const cells = shiftNames.map(sn => {
+    const v = matrix[name + "|||" + sn] || 0;
+    return `<td class="col-shift${v === 0 ? " cell-zero" : ""}">${v || "—"}</td>`;
+  }).join("");
+  const rowClass = i % 2 === 1 ? ' class="row-even"' : '';
+  return `<tr${rowClass}>
+    <td class="col-rank">${i + 1}</td>
+    <td class="col-name">${esc(name)}</td>
+    <td class="col-bar"><div class="bar-wrap"><div class="bar-fill" style="width:${pct}%"></div><span class="bar-label">${total}</span></div></td>
+    ${cells}
+    <td class="col-total">${total}</td>
+  </tr>`;
+}).join("")}
+</tbody>
+<tfoot>
+  <tr>
+    <td colspan="3" class="foot-label">รวม/กะ</td>
+    ${shiftNames.map(sn => {
+      const t = sorted.reduce((s, [name]) => s + (matrix[name + "|||" + sn] || 0), 0);
+      return `<td class="col-shift"><strong>${t}</strong></td>`;
+    }).join("")}
+    <td class="col-total"><strong>${realSlots.length}</strong></td>
+  </tr>
+</tfoot>
+</table>`);
   }
 
   printWin.document.write('</body></html>');
