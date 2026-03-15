@@ -220,20 +220,25 @@ function _checkDependsOnPairForCandidate(candidateName, day, shiftName, dayShift
   if (currentName) currentSet.delete(currentName);
   if (candidateName) currentSet.add(candidateName);
 
+  // Group depends_on rules by dependent — OR logic: ผ่านถ้ามี provider ใด provider หนึ่งอยู่
+  const depGroups = new Map(); // dependent -> [provider, ...]
   for (const p of (pairRulesCache || [])) {
     if (!p || p.pair_type !== "depends_on") continue;
     if (!_pairShiftApplies(p, shiftName)) continue;
-    const provider = p.name_1;
-    const dependent = p.name_2;
-    if (!provider || !dependent) continue;
-    if (currentSet.has(dependent) && !currentSet.has(provider)) {
+    if (!p.name_1 || !p.name_2) continue;
+    if (!depGroups.has(p.name_2)) depGroups.set(p.name_2, []);
+    depGroups.get(p.name_2).push(p.name_1);
+  }
+
+  for (const [dependent, providers] of depGroups) {
+    if (!currentSet.has(dependent)) continue;
+    const anyPresent = providers.some(pr => currentSet.has(pr));
+    if (!anyPresent) {
+      const providerList = providers.join(" หรือ ");
       if (candidateName === dependent) {
-        return { ok: false, reason: `ต้องอยู่กับ ${provider}` };
+        return { ok: false, reason: `ต้องอยู่กับ ${providerList}` };
       }
-      if (candidateName === provider) {
-        return { ok: false, reason: `${dependent} ต้องอยู่กับ ${provider}` };
-      }
-      return { ok: false, reason: `${dependent} ต้องอยู่กับ ${provider}` };
+      return { ok: false, reason: `${dependent} ต้องอยู่กับ ${providerList}` };
     }
   }
   return { ok: true, reason: "" };
