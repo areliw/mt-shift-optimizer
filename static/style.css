@@ -722,6 +722,25 @@ textarea:focus {
   background: var(--accent);
 }
 
+.process-step-link {
+  color: inherit;
+  text-decoration: none;
+  font-weight: inherit;
+}
+.process-step-link:hover { text-decoration: underline; }
+.process-step.current .process-step-link { color: var(--primary); font-weight: 600; }
+
+.process-step-hint {
+  font-size: .72rem;
+  color: var(--primary);
+  background: #eff6ff;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: .2rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .run-ready-hint {
   color: var(--accent);
   font-weight: 500;
@@ -758,6 +777,13 @@ textarea:focus {
   color: var(--warn);
   background: var(--warn-light);
   border: 1px solid #fcd34d;
+}
+
+.message .inline-link {
+  color: var(--danger);
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .app-toast-container {
@@ -822,6 +848,17 @@ textarea:focus {
 }
 
 .cell-dummy:hover { background: #fca5a5; }
+
+.cell-dummy-hint {
+  display: block;
+  font-size: .65rem;
+  font-weight: 400;
+  color: #ef4444;
+  opacity: .75;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+.cell-dummy { flex-direction: column; align-items: flex-start; gap: 0; }
 
 /* ===== Editable filled slots ===== */
 .cell-name {

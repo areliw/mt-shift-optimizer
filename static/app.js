@@ -1671,7 +1671,7 @@ function renderSchedule(data, staffList) {
               html += `<td class="${roomSep.trim()}"></td>`;
             }
           } else if (s.is_dummy) {
-            html += `<td class="td-has-dummy${roomSep}"><span class="cell-dummy" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" title="คลิกเพื่อมอบหมาย">ว่าง</span></td>`;
+            html += `<td class="td-has-dummy${roomSep}"><span class="cell-dummy" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" title="คลิกเพื่อมอบหมาย">ว่าง<span class="cell-dummy-hint">กดเพื่อมอบหมาย</span></span></td>`;
           } else {
             const nameSpan = `<span class="cell-name" data-run="${runId}" data-day="${day}" data-shift="${escapeHtml(sn)}" data-pos="${escapeHtml(pos)}" data-slot="${si}" data-name="${escapeHtml(s.staff_name)}" title="คลิกเพื่อเปลี่ยน">${escapeHtml(s.staff_name)}</span>`;
             const content = nameSpan;
@@ -2267,20 +2267,28 @@ function updateHomeProcessSteps() {
   const numDaysVal = document.getElementById("num_days") && document.getElementById("num_days").value.trim();
   const hasSettings = !!numDaysVal && !isNaN(parseInt(numDaysVal, 10)) && parseInt(numDaysVal, 10) > 0;
   const steps = [
-    { num: 1, label: "ตั้งค่า", done: hasSettings },
-    { num: 2, label: "ทักษะ", done: lastCounts.skills > 0 },
-    { num: 3, label: "บุคลากร", done: lastCounts.staff > 0 },
-    { num: 4, label: "กะ", done: lastCounts.shifts > 0 },
-    { num: 5, label: "สร้างตาราง", done: false },
+    { num: 1, label: "ทักษะ", done: lastCounts.skills > 0, page: "skills", hint: "เพิ่มทักษะก่อน" },
+    { num: 2, label: "บุคลากร", done: lastCounts.staff > 0, page: "staff", hint: "เพิ่มบุคลากร" },
+    { num: 3, label: "กะ", done: lastCounts.shifts > 0, page: "shifts", hint: "สร้างกะเวร" },
+    { num: 4, label: "สร้างตาราง", done: false, page: null, hint: "" },
   ];
+  const firstIncomplete = steps.findIndex((s) => !s.done);
   let html = "";
   steps.forEach((s, i) => {
-    const doneClass = s.done ? " done" : "";
-    html += `<span class="process-step${doneClass}" role="listitem"><span class="process-step-num">${s.done ? "✓" : s.num}</span> ${escapeHtml(s.label)}</span>`;
+    const isCurrent = i === firstIncomplete && !s.done;
+    const doneClass = s.done ? " done" : isCurrent ? " current" : "";
+    const inner = s.done ? "✓" : s.num;
+    const label = s.page
+      ? `<a href="#" class="process-step-link" data-page="${s.page}" title="${s.done ? "" : s.hint}">${escapeHtml(s.label)}</a>`
+      : escapeHtml(s.label);
+    html += `<span class="process-step${doneClass}" role="listitem"><span class="process-step-num">${inner}</span> ${label}${isCurrent ? `<span class="process-step-hint">${s.hint}</span>` : ""}</span>`;
     if (i < steps.length - 1) html += '<span class="process-step-connector" aria-hidden="true"></span>';
   });
   container.innerHTML = html;
-  const ready = hasSettings && lastCounts.skills > 0 && lastCounts.staff > 0 && lastCounts.shifts > 0;
+  container.querySelectorAll(".process-step-link").forEach((a) => {
+    a.addEventListener("click", (e) => { e.preventDefault(); navigateTo(a.dataset.page); });
+  });
+  const ready = lastCounts.skills > 0 && lastCounts.staff > 0 && lastCounts.shifts > 0;
   const hint = document.getElementById("run_ready_hint");
   if (hint) hint.style.display = ready ? "" : "none";
 }
@@ -3130,6 +3138,23 @@ document.getElementById("run_schedule").addEventListener("click", async () => {
   const msg = document.getElementById("run_message");
   msg.textContent = "";
   msg.className = "message";
+
+  // Pre-validate: check staff and shifts exist before hitting server
+  const missing = [];
+  if (lastCounts.staff === 0) missing.push("บุคลากร");
+  if (lastCounts.shifts === 0) missing.push("กะเวร");
+  if (missing.length > 0) {
+    const missingLinks = missing.map((m) => {
+      const page = m === "บุคลากร" ? "staff" : "shifts";
+      return `<a href="#" class="inline-link" data-page="${page}">${m}</a>`;
+    }).join(" และ ");
+    msg.innerHTML = `⚠ ยังไม่มี ${missingLinks} — กรุณาเพิ่มก่อนสร้างตาราง`;
+    msg.className = "message error";
+    msg.querySelectorAll(".inline-link").forEach((a) => {
+      a.addEventListener("click", (e) => { e.preventDefault(); navigateTo(a.dataset.page); });
+    });
+    return;
+  }
   if (btn) {
     btn.disabled = true;
     btn.classList.add("is-loading");
