@@ -364,6 +364,15 @@ function _saveTokens(t) { localStorage.setItem('ws_tokens', JSON.stringify(t)); 
 async function loadWorkspaces() {
   try {
     const r = await fetch('/api/workspaces');
+    if (r.status === 401 || r.status === 403) {
+      // API_KEY required — ใช้ token จาก localStorage แทน
+      const tokens = _getTokens();
+      const el = document.getElementById('wsList');
+      const ids = Object.keys(tokens);
+      if (!ids.length) { el.innerHTML = '<p class="empty-msg">ยังไม่มี workspace ในเครื่องนี้ — สร้างใหม่ได้เลย</p>'; return; }
+      el.innerHTML = ids.map(id => `<div class="ws-item"><a href="/w/${id}/?t=${tokens[id]}" class="ws-link">${id}</a></div>`).join('');
+      return;
+    }
     if (!r.ok) { document.getElementById('wsList').innerHTML = '<p class="empty-msg">โหลดไม่สำเร็จ (' + r.status + ')</p>'; return; }
     const list = await r.json();
     const tokens = _getTokens();
