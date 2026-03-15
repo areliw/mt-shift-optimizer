@@ -1439,7 +1439,8 @@ def api_assign_slot(run_id: int, body: SlotAssign):
         raise HTTPException(status_code=400, detail="staff_name ต้องไม่ว่าง")
     warnings = _check_staff_off_day_warnings(name, body.day)
     try:
-        update_slot_staff(run_id, body.day, body.shift_name, body.position, body.slot_index, name, force=body.force)
+        dep_warnings = update_slot_staff(run_id, body.day, body.shift_name, body.position, body.slot_index, name, force=body.force) or []
+        warnings = warnings + dep_warnings
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     updated = get_schedule(run_id)

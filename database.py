@@ -2275,12 +2275,14 @@ def _validate_depends_on_for_shift(conn, run_id, day, shift_name, overrides=None
         if shift_names and shift_name not in shift_names:
             continue
         dep_groups.setdefault(dependent_name, []).append(provider_name)
+    warnings = []
     for dependent_name, providers in dep_groups.items():
         if dependent_name not in assigned_set:
             continue
         if not any(p in assigned_set for p in providers):
             provider_list = " หรือ ".join(providers)
-            raise ValueError(f"'{dependent_name}' ต้องอยู่กะเดียวกันกับ '{provider_list}' ({shift_name})")
+            warnings.append(f"'{dependent_name}' ควรอยู่กะเดียวกันกับ '{provider_list}' ({shift_name})")
+    return warnings
 
 
 def _validate_manual_assignment(conn, run_id, day, shift_name, position, slot_index, staff_name, exclude_slot=None, override_slots=None):
@@ -2413,21 +2415,21 @@ def update_slot_staff(run_id, day, shift_name, position, slot_index, new_staff_n
             exclude_slot=target_slot,
         )
 
-        # เช็ค depends_on ทั้งกะ/วัน หลังแทนที่ชื่อใหม่ (ข้ามถ้า force=True)
-        if not force:
-            _validate_depends_on_for_shift(
-                conn,
-                run_id,
-                day,
-                shift_name,
-                overrides={target_slot: new_staff_name},
-            )
+        # เช็ค depends_on — คืน warnings (ไม่ throw แล้ว, manual override ผ่านได้เสมอ)
+        dep_warnings = _validate_depends_on_for_shift(
+            conn,
+            run_id,
+            day,
+            shift_name,
+            overrides={target_slot: new_staff_name},
+        ) or []
 
         conn.execute(
             "UPDATE schedule_slot SET staff_name = ? WHERE run_id = ? AND day = ? AND shift_name = ? AND position = ? AND slot_index = ?",
             (new_staff_name, run_id, day, shift_name, position, slot_index),
         )
         conn.commit()
+        return dep_warnings
     finally:
         if close:
             conn.close()

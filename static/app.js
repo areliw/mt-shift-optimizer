@@ -1789,7 +1789,7 @@ function renderScheduleSummary(slots, staffList) {
   wrap.after(div);
 }
 
-// ส่ง PATCH slot — ถ้า depends_on fail ถามยืนยัน force override
+// ส่ง PATCH slot — depends_on เป็นแค่ warning ไม่ block
 async function _patchSlot(runId, day, shiftName, position, slotIndex, staffName, onFail) {
   const body = { day, shift_name: shiftName, position, slot_index: slotIndex, staff_name: staffName };
   try {
@@ -1800,28 +1800,11 @@ async function _patchSlot(runId, day, shiftName, position, slotIndex, staffName,
     });
     const rj = await r.json().catch(() => ({}));
     if (!r.ok) {
-      const detail = rj.detail || "assign failed";
-      // ถ้าเป็น depends_on error → ถามยืนยัน force
-      if (detail.includes("ต้องอยู่กะเดียวกัน")) {
-        const confirmed = confirm(`⚠️ Rule: ${detail}\n\nยืนยันเพิ่มโดยไม่มีคู่? (override rule)`);
-        if (!confirmed) { if (onFail) onFail(); return false; }
-        // retry with force=true
-        const r2 = await fetch(`${API}/schedule/${runId}/slot`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...body, force: true }),
-        });
-        const rj2 = await r2.json().catch(() => ({}));
-        if (!r2.ok) { if (onFail) onFail(); alert("เปลี่ยนไม่สำเร็จ: " + (rj2.detail || "error")); return false; }
-        if (rj2.warnings && rj2.warnings.length) alert("⚠️ คำเตือน:\n" + rj2.warnings.join("\n"));
-      } else {
-        if (onFail) onFail();
-        alert("เปลี่ยนไม่สำเร็จ: " + detail);
-        return false;
-      }
-    } else {
-      if (rj.warnings && rj.warnings.length) alert("⚠️ คำเตือน:\n" + rj.warnings.join("\n"));
+      if (onFail) onFail();
+      alert("เปลี่ยนไม่สำเร็จ: " + (rj.detail || "error"));
+      return false;
     }
+    if (rj.warnings && rj.warnings.length) alert("⚠️ คำเตือน:\n" + rj.warnings.join("\n"));
     await refreshSchedule();
     return true;
   } catch (e) {
