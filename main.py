@@ -1174,39 +1174,78 @@ def api_export_schedule_xlsx(run_id: int | None = None):
     title_cell.fill = fill("FFFFFF")
     ws.row_dimensions[1].height = 22
 
-    # Header row (row 2)
+    # ── Headers: 2 rows (row 2 = shift group, row 3 = position) ──
     HDR_FILL = fill("1E293B")
     HDR_FONT = Font(name="Cordia New", bold=True, color="F8FAFC", size=11)
+    POS_FONT = Font(name="Cordia New", bold=True, color="1E293B", size=10)
     CTR = Alignment(horizontal="center", vertical="center", wrap_text=True)
     BDR = thin_border()
 
-    ws.cell(2, 1, "วันที่").font = HDR_FONT
-    ws.cell(2, 1).fill = HDR_FILL
-    ws.cell(2, 1).alignment = CTR
-    ws.cell(2, 1).border = BDR
-    ws.cell(2, 2, "วัน").font = HDR_FONT
-    ws.cell(2, 2).fill = HDR_FILL
-    ws.cell(2, 2).alignment = CTR
-    ws.cell(2, 2).border = BDR
-
-    for ci, (label, key) in enumerate(zip(col_headers, col_keys), start=3):
-        c = ws.cell(2, ci, label)
-        c.font = HDR_FONT
-        c.fill = HDR_FILL
-        c.alignment = CTR
+    def hdr(row, col, val, fnt, flll, aln=None):
+        c = ws.cell(row, col, val)
+        c.font = fnt
+        c.fill = flll
+        c.alignment = aln or CTR
         c.border = BDR
+        return c
 
-    ws.row_dimensions[2].height = 30
+    # วันที่ / วัน — span both header rows
+    ws.merge_cells(start_row=2, start_column=1, end_row=3, end_column=1)
+    hdr(2, 1, "วันที่", HDR_FONT, HDR_FILL)
+    ws.merge_cells(start_row=2, start_column=2, end_row=3, end_column=2)
+    hdr(2, 2, "วัน", HDR_FONT, HDR_FILL)
+
+    # Group col_keys by shift name to build merged shift header
+    shift_groups: list = []  # (shift_name, start_col, end_col)
+    cur_shift = None
+    cur_start = 3
+    for ci_off, (sn, pos, si) in enumerate(col_keys):
+        col_ci = ci_off + 3
+        if sn != cur_shift:
+            if cur_shift is not None:
+                shift_groups.append((cur_shift, cur_start, col_ci - 1))
+            cur_shift = sn
+            cur_start = col_ci
+    if cur_shift is not None:
+        shift_groups.append((cur_shift, cur_start, len(col_keys) + 2))
+
+    # Row 2 — shift name (merged, dark)
+    for sn, sc, ec in shift_groups:
+        if sc == ec:
+            ws.cell(2, sc)  # single col, no merge needed
+        else:
+            ws.merge_cells(start_row=2, start_column=sc, end_row=2, end_column=ec)
+        hdr(2, sc, sn, HDR_FONT, HDR_FILL)
+
+    # Row 3 — position name (light background, per shift color)
+    for ci_off, (sn, pos, si) in enumerate(col_keys):
+        col_ci = ci_off + 3
+        label = pos if pos else sn
+        if si > 0:
+            label += f" {si+1}"
+        bg = SHIFT_BG[shift_color_idx[sn]]
+        pos_fill = fill(bg)
+        pos_border_top = Side(style="medium", color="1E293B")
+        c = ws.cell(3, col_ci, label)
+        c.font = POS_FONT
+        c.fill = pos_fill
+        c.alignment = CTR
+        from openpyxl.styles import Border as OBorder
+        t = Side(style="thin", color="CBD5E1")
+        c.border = OBorder(left=t, right=t, top=pos_border_top, bottom=t)
+
+    ws.row_dimensions[2].height = 22
+    ws.row_dimensions[3].height = 20
     ws.column_dimensions["A"].width = 16
     ws.column_dimensions["B"].width = 5
     for ci in range(len(col_keys)):
         ws.column_dimensions[get_column_letter(ci + 3)].width = 14
 
-    ws.freeze_panes = "A3"
+    ws.freeze_panes = "A4"
 
     # Data rows
     for day in range(num_days):
-        row_num = day + 3
+        row_num = day + 4
         if base:
             dt = base + timedelta(days=day)
             date_label = f"{dt.day} {THAI_MONTHS_SHORT[dt.month-1]} {dt.year+543}"
