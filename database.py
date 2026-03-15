@@ -2396,7 +2396,7 @@ def _validate_manual_assignment(conn, run_id, day, shift_name, position, slot_in
             raise ValueError(f"'{staff_name}' ตั้งเพดานกะ '{shift_name}' สูงสุด {mx} เวร/เดือน")
 
 
-def update_slot_staff(run_id, day, shift_name, position, slot_index, new_staff_name, conn=None):
+def update_slot_staff(run_id, day, shift_name, position, slot_index, new_staff_name, conn=None, force=False):
     """Manual override: เปลี่ยนชื่อ staff ใน slot ที่ระบุ (เช่น แทนที่ _DUMMY_ ด้วยคนจริง)"""
     close = conn is None
     conn = conn or get_connection()
@@ -2413,14 +2413,15 @@ def update_slot_staff(run_id, day, shift_name, position, slot_index, new_staff_n
             exclude_slot=target_slot,
         )
 
-        # เช็ค depends_on ทั้งกะ/วัน หลังแทนที่ชื่อใหม่
-        _validate_depends_on_for_shift(
-            conn,
-            run_id,
-            day,
-            shift_name,
-            overrides={target_slot: new_staff_name},
-        )
+        # เช็ค depends_on ทั้งกะ/วัน หลังแทนที่ชื่อใหม่ (ข้ามถ้า force=True)
+        if not force:
+            _validate_depends_on_for_shift(
+                conn,
+                run_id,
+                day,
+                shift_name,
+                overrides={target_slot: new_staff_name},
+            )
 
         conn.execute(
             "UPDATE schedule_slot SET staff_name = ? WHERE run_id = ? AND day = ? AND shift_name = ? AND position = ? AND slot_index = ?",

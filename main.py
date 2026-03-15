@@ -471,6 +471,7 @@ class SlotAssign(BaseModel):
     position: str
     slot_index: int = 0
     staff_name: str
+    force: bool = False  # True = ข้าม depends_on validation (manual override)
 
 
 class SlotSwap(BaseModel):
@@ -1438,7 +1439,7 @@ def api_assign_slot(run_id: int, body: SlotAssign):
         raise HTTPException(status_code=400, detail="staff_name ต้องไม่ว่าง")
     warnings = _check_staff_off_day_warnings(name, body.day)
     try:
-        update_slot_staff(run_id, body.day, body.shift_name, body.position, body.slot_index, name)
+        update_slot_staff(run_id, body.day, body.shift_name, body.position, body.slot_index, name, force=body.force)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     updated = get_schedule(run_id)

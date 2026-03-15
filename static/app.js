@@ -1789,6 +1789,48 @@ function renderScheduleSummary(slots, staffList) {
   wrap.after(div);
 }
 
+// ส่ง PATCH slot — ถ้า depends_on fail ถามยืนยัน force override
+async function _patchSlot(runId, day, shiftName, position, slotIndex, staffName, onFail) {
+  const body = { day, shift_name: shiftName, position, slot_index: slotIndex, staff_name: staffName };
+  try {
+    const r = await fetch(`${API}/schedule/${runId}/slot`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const rj = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const detail = rj.detail || "assign failed";
+      // ถ้าเป็น depends_on error → ถามยืนยัน force
+      if (detail.includes("ต้องอยู่กะเดียวกัน")) {
+        const confirmed = confirm(`⚠️ Rule: ${detail}\n\nยืนยันเพิ่มโดยไม่มีคู่? (override rule)`);
+        if (!confirmed) { if (onFail) onFail(); return false; }
+        // retry with force=true
+        const r2 = await fetch(`${API}/schedule/${runId}/slot`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...body, force: true }),
+        });
+        const rj2 = await r2.json().catch(() => ({}));
+        if (!r2.ok) { if (onFail) onFail(); alert("เปลี่ยนไม่สำเร็จ: " + (rj2.detail || "error")); return false; }
+        if (rj2.warnings && rj2.warnings.length) alert("⚠️ คำเตือน:\n" + rj2.warnings.join("\n"));
+      } else {
+        if (onFail) onFail();
+        alert("เปลี่ยนไม่สำเร็จ: " + detail);
+        return false;
+      }
+    } else {
+      if (rj.warnings && rj.warnings.length) alert("⚠️ คำเตือน:\n" + rj.warnings.join("\n"));
+    }
+    await refreshSchedule();
+    return true;
+  } catch (e) {
+    if (onFail) onFail();
+    alert("เปลี่ยนไม่สำเร็จ: " + e.message);
+    return false;
+  }
+}
+
 async function handleDummyClick(span, staffList, runId, busyByDay, dayShiftStaffMap, startDate) {
   if (span.dataset.loading) return;
   const day = parseInt(span.dataset.day, 10);
@@ -1911,20 +1953,8 @@ async function handleDummyClick(span, staffList, runId, busyByDay, dayShiftStaff
     const staffName = select.value;
     if (!staffName) return;
     select.disabled = true;
-    try {
-      const r = await fetch(`${API}/schedule/${runId}/slot`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ day, shift_name: shiftName, position, slot_index: slotIndex, staff_name: staffName }),
-      });
-      const rj = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(rj.detail || "assign failed");
-      if (rj.warnings && rj.warnings.length) alert("⚠️ คำเตือน:\n" + rj.warnings.join("\n"));
-      await refreshSchedule();
-    } catch (e) {
-      restoreSpan();
-      alert("มอบหมายไม่สำเร็จ: " + e.message);
-    }
+    const ok = await _patchSlot(runId, day, shiftName, position, slotIndex, staffName, restoreSpan);
+    if (!ok) select.disabled = false;
   });
   select.addEventListener("blur", () => { if (!select.value) restoreSpan(); });
 }
@@ -2093,20 +2123,8 @@ function _openNameDropdown(span, staffList, runId, busyByDay, dayShiftStaffMap, 
     if (!staffName) return;
     select.disabled = true;
     swapBtn.disabled = true;
-    try {
-      const r = await fetch(`${API}/schedule/${runId}/slot`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ day, shift_name: shiftName, position, slot_index: slotIndex, staff_name: staffName }),
-      });
-      const rj = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(rj.detail || "assign failed");
-      if (rj.warnings && rj.warnings.length) alert("⚠️ คำเตือน:\n" + rj.warnings.join("\n"));
-      await refreshSchedule();
-    } catch (e) {
-      restoreSpan();
-      alert("เปลี่ยนไม่สำเร็จ: " + e.message);
-    }
+    const ok = await _patchSlot(runId, day, shiftName, position, slotIndex, staffName, restoreSpan);
+    if (!ok) { select.disabled = false; swapBtn.disabled = false; }
   });
   select.addEventListener("blur", (e) => {
     // delay เพื่อให้ swapBtn click ทำงานก่อน
