@@ -3536,6 +3536,31 @@ document.getElementById("print_schedule").addEventListener("click", () => {
 
   const thShifts = clone.querySelectorAll("th.th-shift");
 
+  // Color td cells by shift column (headers unchanged)
+  const headerRows = clone.querySelectorAll("thead tr");
+  let shiftRow = null;
+  headerRows.forEach(r => { if (r.querySelector("th.th-shift")) shiftRow = r; });
+  if (shiftRow) {
+    const colColors = [];
+    let colIdx = 1;
+    shiftRow.querySelectorAll("th.th-shift").forEach((th, i) => {
+      const span = parseInt(th.getAttribute("colspan") || "1");
+      const c = SHIFT_COLORS[i % SHIFT_COLORS.length];
+      for (let k = 0; k < span; k++) colColors[colIdx++] = c;
+    });
+    clone.querySelectorAll("tbody tr").forEach(row => {
+      let ci = 0;
+      row.querySelectorAll("td").forEach(td => {
+        if (ci === 0) { ci++; return; }
+        const c = colColors[ci];
+        if (c && !td.classList.contains("td-has-dummy") && !td.classList.contains("td-inactive")) {
+          td.style.background = c.bg;
+        }
+        ci++;
+      });
+    });
+  }
+
   const now = new Date();
   const printedAt = now.toLocaleDateString("th-TH", { year: "numeric", month: "long", day: "numeric" });
 
