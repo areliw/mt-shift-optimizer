@@ -74,9 +74,14 @@ def init_master_db():
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL DEFAULT '',
             access_token TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_accessed TEXT
         )
     """)
+    # migration: เพิ่ม last_accessed ถ้ายังไม่มี
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(workspace)").fetchall()]
+    if "last_accessed" not in cols:
+        conn.execute("ALTER TABLE workspace ADD COLUMN last_accessed TEXT")
     conn.commit()
     # Migrate: เพิ่มคอลัมน์ access_token ให้ตารางเก่า
     try:
@@ -186,8 +191,17 @@ def verify_workspace_token(wid: str, token: str) -> bool:
     stored = row[0] or ""
     # workspace มี token ว่าง (ข้อมูลเก่าก่อน migrate) → อนุญาตเข้าได้เสมอ
     if not stored:
-        return True
-    return secrets.compare_digest(stored, token)
+        ok = True
+    else:
+        ok = secrets.compare_digest(stored, token)
+    if ok:
+        conn2 = _get_master_connection()
+        conn2.execute(
+            "UPDATE workspace SET last_accessed = datetime('now') WHERE id = ?", (wid,)
+        )
+        conn2.commit()
+        conn2.close()
+    return ok
 
 
 def get_workspace(wid: str):
@@ -216,10 +230,10 @@ def list_workspaces(include_tokens: bool = False):
         conn.close()
         return [{"id": r[0], "name": r[1], "created_at": r[2], "token": r[3]} for r in rows]
     rows = conn.execute(
-        "SELECT id, name, created_at FROM workspace ORDER BY created_at DESC"
+        "SELECT id, name, created_at, last_accessed FROM workspace ORDER BY created_at DESC"
     ).fetchall()
     conn.close()
-    return [{"id": r[0], "name": r[1], "created_at": r[2]} for r in rows]
+    return [{"id": r[0], "name": r[1], "created_at": r[2], "last_accessed": r[3]} for r in rows]
 
 
 def delete_workspace(wid: str) -> bool:
