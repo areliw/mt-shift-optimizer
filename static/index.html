@@ -206,25 +206,23 @@
       <section class="card">
         <h2>เพิ่มบุคลากร</h2>
 
-        <!-- ── Essential fields (always visible) ── -->
-        <div class="staff-essential">
-          <div class="staff-essential-row">
+        <!-- ── Quick-add form ── -->
+        <div class="staff-quickadd">
+          <div class="staff-qa-row staff-qa-identity">
             <input type="text" id="staff_name" placeholder="ชื่อ-นามสกุล" aria-label="ชื่อ" class="staff-name-input" />
             <select id="staff_title_select" aria-label="ตำแหน่ง" class="staff-title-select">
               <option value="">— ตำแหน่ง —</option>
             </select>
           </div>
-          <div class="staff-essential-row staff-essential-checks">
-            <div class="staff-essential-group">
-              <span class="staff-essential-label">ทักษะ</span>
-              <div id="staff_add_skills" class="staff-skills-checkboxes"></div>
-            </div>
-            <div class="staff-essential-group">
-              <span class="staff-essential-label">ช่วงเวลาที่อยู่ได้</span>
-              <div id="staff_add_time_windows" class="staff-time-windows-checkboxes"></div>
-            </div>
+          <div class="staff-qa-row">
+            <span class="staff-qa-label">ทักษะ</span>
+            <div id="staff_add_skills" class="staff-skills-checkboxes staff-pill-scroll"></div>
           </div>
-          <button type="button" id="add_staff" class="btn-primary btn-add-staff">+ เพิ่มบุคลากร</button>
+          <div class="staff-qa-row">
+            <span class="staff-qa-label">ช่วงเวลา</span>
+            <div id="staff_add_time_windows" class="staff-time-windows-checkboxes staff-pill-scroll"></div>
+            <button type="button" id="add_staff" class="btn-primary btn-add-staff">+ เพิ่ม</button>
+          </div>
         </div>
 
         <!-- ── Advanced fields (collapsed by default) ── -->

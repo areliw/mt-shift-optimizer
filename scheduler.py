@@ -897,23 +897,42 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
                         model.add(has_work[(n1, day)] == has_work[(n2, day)]).only_enforce_if(diff.negated())
                         together_penalty_terms.append(diff)
         elif p["pair_type"] == "depends_on":
-            # n2 ทำงานได้เฉพาะเวรเดียวกับ n1 (ถ้า n2 อยู่เวร S วัน D → n1 ต้องอยู่เวร S วัน D ด้วย)
-            for day in range(num_days):
-                for shift in shift_list:
-                    sn = shift["name"]
-                    if not _shift_applies(sn):
-                        continue
-                    sn_slots = slots_by_shift.get(sn, [])
-                    n2_in_shift = [assign[(n2, day, sn, pn, si)] for _, _, pn, si in sn_slots]
-                    n1_in_shift = [assign[(n1, day, sn, pn, si)] for _, _, pn, si in sn_slots]
-                    if not n2_in_shift:
-                        continue
-                    if not n1_in_shift:
-                        # n1 ไม่มีสิทธิ์อยู่กะนี้เลย → n2 ก็ต้องห้ามด้วย
-                        for v in n2_in_shift:
-                            model.add(v == 0)
-                    else:
-                        model.add(sum(n2_in_shift) <= sum(n1_in_shift))
+            pass  # handled below as OR-grouped
+
+    # --- depends_on: OR-grouped — n2 ทำกะ S วัน D ได้ถ้า n1 ใด n1 หนึ่งอยู่กะ S วัน D ---
+    # ถ้ามีหลาย depends_on rule ที่ n2+shift_filter เหมือนกัน → รวมเป็น OR (ไม่ใช่ AND)
+    from collections import defaultdict
+    _dep_groups: dict = defaultdict(list)  # (n2, frozenset(shift_filter)) -> [n1, ...]
+    for p in pairs:
+        if p["pair_type"] != "depends_on":
+            continue
+        _n1, _n2 = p["name_1"], p["name_2"]
+        if _n1 not in name_to_mt or _n2 not in name_to_mt:
+            continue
+        _sf = frozenset(str(s).strip() for s in (p.get("shift_names") or []) if str(s).strip())
+        _dep_groups[(_n2, _sf)].append(_n1)
+
+    for (_n2, _sf_key), _n1_list in _dep_groups.items():
+        def _dep_shift_applies(sn, _sf=_sf_key):
+            return not _sf or sn in _sf
+        for day in range(num_days):
+            for shift in shift_list:
+                sn = shift["name"]
+                if not _dep_shift_applies(sn):
+                    continue
+                sn_slots = slots_by_shift.get(sn, [])
+                n2_terms = [assign[(_n2, day, sn, pn, si)] for _, _, pn, si in sn_slots]
+                if not n2_terms:
+                    continue
+                # OR: รวม slot ของ n1 ทุกคน — n2 ≤ Σ n1i
+                all_n1_terms = []
+                for _n1 in _n1_list:
+                    all_n1_terms.extend([assign[(_n1, day, sn, pn, si)] for _, _, pn, si in sn_slots])
+                if not all_n1_terms:
+                    for v in n2_terms:
+                        model.add(v == 0)
+                else:
+                    model.add(sum(n2_terms) <= sum(all_n1_terms))
 
     # --- Soft penalty for consecutive working days (no hard limit) ---
     consecutive_penalty_terms = []
@@ -961,7 +980,10 @@ def generate_schedule(num_days=None, start_date_str=None, timeout_seconds=30, on
     spacing_obj = sum(consecutive_penalty_terms) * 5 if consecutive_penalty_terms else 0
     together_obj = sum(together_penalty_terms) * 3 if together_penalty_terms else 0
     extra_shift_obj = sum(extra_shift_penalty_terms) if extra_shift_penalty_terms else 0
-    total_obj = excess_obj + spacing_obj + together_obj + extra_shift_obj
+    # min_shift shortfall: หักต่อเวรที่ขาดจาก min — penalty สูงพอให้ solver พยายามถึง min
+    MIN_SHORT_PENALTY = 50_000
+    min_short_obj = sum(min_shift_penalty_terms) * MIN_SHORT_PENALTY if min_shift_penalty_terms else 0
+    total_obj = excess_obj + spacing_obj + together_obj + extra_shift_obj + min_short_obj
 
     # ยัดคนที่ skill level สูงกว่าเข้าไปก่อน (ตำแหน่งที่ต้องการทักษะ) — CP-SAT ใช้ integer เท่านั้น
     skill_pref_terms = []
